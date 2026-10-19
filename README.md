@@ -1,4 +1,4 @@
-# HyperVox — Minecraft clone built around performance 
+# HyperVox — A C++ Minecraft clone built around performance 
 
 ## setup
 1. Put `minecraft-sounds.zip` into `assets/` (optional — audio)

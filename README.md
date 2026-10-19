@@ -1,2 +1,2 @@
 # HyperVox
-a C++ Minecraft clone desingned foe maximum performance
+a C++ Minecraft clone desingned for maximum performance

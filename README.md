@@ -31,9 +31,9 @@ Worlds are openable in Minecraft — only edited chunks are written; terrain els
 Drop a pack folder into `<data dir>/resourcepacks/` then Options → Textures. Works with any 1.21.x pack.
 
 ## Data folder
-- **Linux:** `~/.local/share/FastVoxelVK/`
-- **Windows:** `%APPDATA%\FastVoxelVK\`
-- **Override:** set `FASTVOXEL_HOME` environment variable
+- **Linux:** `~/.local/share/HyperVox/`
+- **Windows:** `%APPDATA%\HyperVox\`
+- **Override:** set `HYPERVOX_HOME` environment variable
 
 
 ## Terrain

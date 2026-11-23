@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(hypervox LANGUAGES C CXX)
+option(HV_STEEL_STATIC "link SteelMC straight into the game (one executable, no helper process; Linux / macOS / Windows with Rust installed)" OFF)
 if(NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
   message(FATAL_ERROR "hypervox is 64-bit only (this compiler targets ${CMAKE_SIZEOF_VOID_P}-byte pointers)")
 endif()
@@ -23,9 +24,9 @@ if(NOT GLSLC AND NOT GLSLANG_VALIDATOR)
 endif()
 
 add_executable(minecraft
-  src/main.cpp src/Game.cpp src/GameUi.cpp src/Ui.cpp src/UiAtlas.cpp src/Assets.cpp src/Png.cpp src/TexturePack.cpp src/Registry.cpp
+  src/main.cpp src/Game.cpp src/GameUi.cpp src/Ui.cpp src/UiAtlas.cpp src/Assets.cpp src/Png.cpp src/TexturePack.cpp src/Registry.cpp src/Models.cpp src/EntityModel.cpp src/Entity.cpp src/GameEntities.cpp
   src/World.cpp src/Streamer.cpp src/Settings.cpp src/SaveGame.cpp src/SaveAnvil.cpp src/Anvil.cpp src/VulkanRenderer.cpp src/GlRenderer.cpp src/MemUtil.cpp src/Log.cpp src/Gui.cpp src/Mining.cpp src/ChunkStore.cpp
-  src/Sound.cpp src/Chat.cpp src/GameCmd.cpp src/Embedded.cpp src/SteelClient.cpp)
+  src/Sound.cpp src/Chat.cpp src/GameCmd.cpp src/Embedded.cpp src/SteelClient.cpp src/Dimension.cpp)
 target_include_directories(minecraft PRIVATE src)
 set_target_properties(minecraft PROPERTIES ENABLE_EXPORTS ON)   # function names in crash backtraces
 target_link_libraries(minecraft PRIVATE Vulkan::Vulkan glfw PNG::PNG ZLIB::ZLIB Threads::Threads)
@@ -60,11 +61,15 @@ add_custom_target(shaders DEPENDS ${SHADER_SPV})
 add_dependencies(minecraft shaders)
 add_custom_command(TARGET minecraft POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory ${SHADER_OUT} $<TARGET_FILE_DIR:minecraft>/shaders)
 
+if(HV_STEEL_STATIC)
+  include(${CMAKE_SOURCE_DIR}/cmake/SteelLib.cmake)   # downloads the data jar, builds SteelMC with cargo, links it in (all pure CMake)
+endif()
+
 # ---- single-file release: shaders and (if present in assets/) the asset + sound zips are linked into the executable ----
 if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT APPLE)
   set(EMBED_DEFS "HV_SHADER_DIR=\"${SHADER_OUT}\"")
   set(EMBED_DEPS ${SHADER_SPV})
-  file(GLOB HV_ASSET_ZIPS ${CMAKE_SOURCE_DIR}/assets/*assets*.zip)    # e.g. hypervox_assets.zip / minecraft-assets.zip
+  file(GLOB HV_ASSET_ZIPS ${CMAKE_SOURCE_DIR}/assets/*assets*.zip)    # e.g. hypervox_assets.zip / hypervox_assets.zip
   file(GLOB HV_SOUND_ZIPS ${CMAKE_SOURCE_DIR}/assets/*sound*.zip)
   if(HV_ASSET_ZIPS)
     list(GET HV_ASSET_ZIPS 0 HV_ASSETS_FILE)
@@ -83,52 +88,34 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang" AND NOT APPLE)
   set_source_files_properties(src/Embedded.cpp PROPERTIES COMPILE_DEFINITIONS "${EMBED_DEFS}" OBJECT_DEPENDS "${EMBED_DEPS}")
 endif()
 
-# ---- texture pack: assets/minecraft-assets.zip (or an already extracted assets/block folder) -----------------------
+# ---- texture pack: assets/hypervox_assets.zip (or an already extracted assets/block folder) -----------------------
 set(ASSET_STAMP ${CMAKE_BINARY_DIR}/assets/.extracted)
-if(EXISTS ${CMAKE_SOURCE_DIR}/assets/minecraft-assets.zip)
+if(EXISTS ${CMAKE_SOURCE_DIR}/assets/hypervox_assets.zip)
   add_custom_command(OUTPUT ${ASSET_STAMP}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/assets
-    COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_BINARY_DIR}/assets ${CMAKE_COMMAND} -E tar xf ${CMAKE_SOURCE_DIR}/assets/minecraft-assets.zip
+    COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_BINARY_DIR}/assets ${CMAKE_COMMAND} -E tar xf ${CMAKE_SOURCE_DIR}/assets/hypervox_assets.zip
     COMMAND ${CMAKE_COMMAND} -E touch ${ASSET_STAMP}
-    DEPENDS ${CMAKE_SOURCE_DIR}/assets/minecraft-assets.zip)
+    DEPENDS ${CMAKE_SOURCE_DIR}/assets/hypervox_assets.zip)
   add_custom_target(extract_assets ALL DEPENDS ${ASSET_STAMP})
   add_dependencies(minecraft extract_assets)
 elseif(EXISTS ${CMAKE_SOURCE_DIR}/assets/block)
   add_custom_target(extract_assets ALL COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_SOURCE_DIR}/assets ${CMAKE_BINARY_DIR}/assets)
   add_dependencies(minecraft extract_assets)
 else()
-  message(WARNING "No texture pack found. Put minecraft-assets.zip into assets/ (the game needs it to start).")
+  message(WARNING "No texture pack found. Put hypervox_assets.zip into assets/ (the game needs it to start).")
 endif()
 
 # ---- sounds -----------------------------------------------------------------------------------
-if(EXISTS ${CMAKE_SOURCE_DIR}/assets/minecraft-sounds.zip)
+if(EXISTS ${CMAKE_SOURCE_DIR}/assets/hypervox_sounds.zip)
   set(SOUND_STAMP ${CMAKE_BINARY_DIR}/sounds/.extracted)
   add_custom_command(OUTPUT ${SOUND_STAMP}
     COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/sounds
-    COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_BINARY_DIR}/sounds ${CMAKE_COMMAND} -E tar xf ${CMAKE_SOURCE_DIR}/assets/minecraft-sounds.zip
+    COMMAND ${CMAKE_COMMAND} -E chdir ${CMAKE_BINARY_DIR}/sounds ${CMAKE_COMMAND} -E tar xf ${CMAKE_SOURCE_DIR}/assets/hypervox_sounds.zip
     COMMAND ${CMAKE_COMMAND} -E touch ${SOUND_STAMP}
-    DEPENDS ${CMAKE_SOURCE_DIR}/assets/minecraft-sounds.zip)
+    DEPENDS ${CMAKE_SOURCE_DIR}/assets/hypervox_sounds.zip)
   add_custom_target(extract_sounds ALL DEPENDS ${SOUND_STAMP})
   add_dependencies(minecraft extract_sounds)
   add_custom_command(TARGET minecraft POST_BUILD COMMAND ${CMAKE_COMMAND} -E copy_directory ${CMAKE_BINARY_DIR}/sounds $<TARGET_FILE_DIR:minecraft>/sounds)
 else()
-  message(STATUS "No minecraft-sounds.zip found in assets/ - game will run silent")
-endif()
-
-# ---- single executable: SteelMC linked in as a static library (build-steel.sh --lib builds steel/libsteel_provider.a + steel/native-libs.txt)
-if(HV_STEEL_STATIC)
-  if(NOT EXISTS ${CMAKE_SOURCE_DIR}/steel/native-libs.txt)
-    execute_process(COMMAND bash ${CMAKE_SOURCE_DIR}/build-steel.sh --lib WORKING_DIRECTORY ${CMAKE_SOURCE_DIR} RESULT_VARIABLE STEEL_RC)
-    if(NOT STEEL_RC EQUAL 0)
-      message(FATAL_ERROR "build-steel.sh --lib failed (needs internet, curl, git, unzip and a C compiler) - or configure with -DHV_STEEL_STATIC=OFF")
-    endif()
-  endif()
-  find_library(STEEL_LIB NAMES steel_provider libsteel_provider PATHS ${CMAKE_SOURCE_DIR}/steel NO_DEFAULT_PATH REQUIRED)
-  file(READ ${CMAKE_SOURCE_DIR}/steel/native-libs.txt STEEL_NATIVE)
-  string(STRIP "${STEEL_NATIVE}" STEEL_NATIVE)
-  separate_arguments(STEEL_NATIVE_LIST NATIVE_COMMAND "${STEEL_NATIVE}")
-  target_compile_definitions(minecraft PRIVATE HV_STEEL_STATIC)
-  set_source_files_properties(src/SteelClient.cpp PROPERTIES COMPILE_DEFINITIONS HV_STEEL_STATIC)
-  target_link_libraries(minecraft PRIVATE ${STEEL_LIB} ${STEEL_NATIVE_LIST})
-  message(STATUS "SteelMC linked in statically: ${STEEL_LIB}")
+  message(STATUS "No hypervox_sounds.zip found in assets/ - game will run silent")
 endif()

@@ -33,7 +33,7 @@ enum:unsigned{
  X(HVgluint,CreateShader,(HVglenum)) X(void,ShaderSource,(HVgluint,HVglsizei,const HVglchar*const*,const HVglint*)) X(void,CompileShader,(HVgluint)) X(void,GetShaderiv,(HVgluint,HVglenum,HVglint*)) \
  X(void,GetShaderInfoLog,(HVgluint,HVglsizei,HVglsizei*,HVglchar*)) X(HVgluint,CreateProgram,(void)) X(void,AttachShader,(HVgluint,HVgluint)) X(void,LinkProgram,(HVgluint)) \
  X(void,GetProgramiv,(HVgluint,HVglenum,HVglint*)) X(void,GetProgramInfoLog,(HVgluint,HVglsizei,HVglsizei*,HVglchar*)) X(void,UseProgram,(HVgluint)) X(void,DeleteShader,(HVgluint)) X(void,DeleteProgram,(HVgluint)) \
- X(HVglint,GetUniformLocation,(HVgluint,const HVglchar*)) X(void,UniformMatrix4fv,(HVglint,HVglsizei,HVglboolean,const HVglfloat*)) X(void,Uniform3f,(HVglint,HVglfloat,HVglfloat,HVglfloat)) X(void,Uniform1i,(HVglint,HVglint)) \
+ X(HVglint,GetUniformLocation,(HVgluint,const HVglchar*)) X(void,UniformMatrix4fv,(HVglint,HVglsizei,HVglboolean,const HVglfloat*)) X(void,Uniform3f,(HVglint,HVglfloat,HVglfloat,HVglfloat)) X(void,Uniform4f,(HVglint,HVglfloat,HVglfloat,HVglfloat,HVglfloat)) X(void,Uniform1i,(HVglint,HVglint)) \
  X(void,DrawElements,(HVglenum,HVglsizei,HVglenum,const void*)) X(void,DrawElementsBaseVertex,(HVglenum,HVglsizei,HVglenum,const void*,HVglint)) X(void,DrawArrays,(HVglenum,HVglint,HVglsizei))
 #define HV_DECL(R,N,A) extern R (HV_GLCALL *hvgl##N) A;
 HV_GL_FUNCS(HV_DECL)

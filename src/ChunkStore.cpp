@@ -20,7 +20,7 @@ uint16_t resolveName(std::string n){
  const Registry&R=Registry::get();
  if(n.compare(0,10,"minecraft:")==0)n=n.substr(10);
  if(n=="air"||n=="cave_air"||n=="void_air")return 0;
- if(n=="enchanting_table")n="enchanting_table_block"; if(n=="magma_block")n="magma"; if(n.compare(0,7,"potted_")==0)return 0;
+ if(n=="enchanting_table")n="enchanting_table_block"; if(n=="magma_block")n="magma"; if(n.compare(0,7,"potted_")==0)return R.blockByName("flower_pot");
  if(uint16_t id=R.shapeHead(n))return id;        // slabs, stairs, carpets, torches, plants, chests ...
  if(uint16_t id=R.blockByName(n))return id;
  auto tryN=[&](const std::string&s)->uint16_t{return R.blockByName(s);};
@@ -53,7 +53,12 @@ bool nbtToChunk(const Nbt&root,Chunk&c){
   const int sy=(int)yy->i+Chunk::Y_OFFSET/16; if(sy<0||sy>=Chunk::HEIGHT/16)continue;
   const Nbt*pl=bs->get("palette"); if(!pl||pl->list.empty())continue;
   std::vector<uint16_t> ids; ids.reserve(pl->list.size());
-  for(auto&pe:pl->list){ const Nbt*nm=pe.get("Name"); std::string ax,fc,hf,ty; if(const Nbt*pr=pe.get("Properties")){ if(const Nbt*a=pr->get("axis"))ax=a->s; if(const Nbt*f=pr->get("facing"))fc=f->s; if(const Nbt*q=pr->get("half"))hf=q->s; if(const Nbt*q=pr->get("type"))ty=q->s; { std::string extra; if(const Nbt*q=pr->get("open"))if(q->s=="true")extra="open"; if(const Nbt*q=pr->get("hinge"))if(q->s=="right")extra+="+right"; if(ty.empty())ty=extra; } } ids.push_back(nm?mapBlock(nm->s,ax,fc,hf,ty):uint16_t(0)); }
+  for(auto&pe:pl->list){ const Nbt*nm=pe.get("Name"); std::string ax,fc,hf,ty; if(const Nbt*pr=pe.get("Properties")){ if(const Nbt*a=pr->get("axis"))ax=a->s; if(const Nbt*f=pr->get("facing"))fc=f->s; if(const Nbt*q=pr->get("half"))hf=q->s; if(const Nbt*q=pr->get("type"))ty=q->s; { std::string extra; if(const Nbt*q=pr->get("open"))if(q->s=="true")extra="open"; if(const Nbt*q=pr->get("hinge"))if(q->s=="right")extra+="+right";
+   if(const Nbt*q=pr->get("thickness")){ extra=q->s; if(const Nbt*d=pr->get("vertical_direction"))extra+="|"+d->s; }   // dripstone
+   int mk=0; static const char*f6[6]={"north","east","south","west","up","down"}; for(int i=0;i<6;i++)if(const Nbt*q=pr->get(f6[i]))if(q->s=="true")mk|=1<<i;   // vines / lichen faces
+   if(mk&&extra.empty())extra="mf"+std::to_string(mk);
+   if(extra.empty()){ if(const Nbt*q=pr->get("layers"))extra="L"+q->s; else if(const Nbt*q=pr->get("age"))extra="A"+q->s; else if(const Nbt*q=pr->get("part"))extra="P"+q->s; else if(const Nbt*q=pr->get("eye"))extra="E"+q->s; }
+   if(ty.empty())ty=extra; } } ids.push_back(nm?mapBlock(nm->s,ax,fc,hf,ty):uint16_t(0)); }
   const Nbt*da=bs->get("data"); int bits=4; while((1<<bits)<(int)ids.size())bits++; const int per=64/bits;
   for(int i=0;i<4096;i++){
    size_t k=0; if(ids.size()>1&&da){const size_t li=(size_t)(i/per); if(li>=da->la.size())break; k=(size_t)(((uint64_t)da->la[li]>>((i%per)*bits))&((1ull<<bits)-1));}

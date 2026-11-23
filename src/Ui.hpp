@@ -8,7 +8,7 @@
 
 struct UiInput{
  float mx=0,my=0;                     // mouse in framebuffer pixels
- bool lclick=false,rclick=false,mclick=false,ldown=false,shift=false;
+ bool lclick=false,rclick=false,mclick=false,ldown=false,rdown=false,shift=false;
  float wheel=0; std::string typed; bool backspace=false; double time=0;
 };
 

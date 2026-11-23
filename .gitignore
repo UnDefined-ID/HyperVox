@@ -1,5 +1,3 @@
 build/
-worlds/
-vcpkg/
 vcpkg_installed/
 *.log

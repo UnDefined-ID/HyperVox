@@ -8,7 +8,7 @@ struct InvSlot{ ItemId id=0; int count=0; bool empty()const{return id==0||count<
 
 // 36 slots: 0..8 = hotbar, 9..35 = main inventory (same order as vanilla).
 struct Inventory{
- InvSlot s[36]; InvSlot armor[4]; int selected=0;   // armor: 0 helmet, 1 chestplate, 2 leggings, 3 boots
+ InvSlot s[36]; InvSlot armor[4]; InvSlot off; int selected=0;   // off = offhand (X swaps it with the held item)   // armor: 0 helmet, 1 chestplate, 2 leggings, 3 boots
  // returns how many items did not fit
  int add(ItemId id,int n){
   for(int pass=0;pass<2&&n>0;pass++)

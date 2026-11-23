@@ -192,6 +192,7 @@ struct Sound::Impl {
     std::unordered_map<std::string,ALuint> bufCache;  // path str -> buffer
     std::mutex mu;
     // ---- streamed music (a track is never decoded in full: 4 buffers of ~32 KB are refilled while it plays)
+    std::string nowPlaying;   // name of the track that just started (taken by the toast)
     struct Music{ std::vector<char> vf; bool open=false,eof=false; ALuint src=0,bufs[4]={0,0,0,0}; int rate=0,ch=0; std::string prefix,last; double wait=0; } mus;
     void musicStop(){ if(mus.src){ al_SourceStop(mus.src); ALint q=0; al_GetSourcei(mus.src,0x1015/*AL_BUFFERS_QUEUED*/,&q); while(q-->0){ALuint b;al_SourceUnqueueBuffers(mus.src,1,&b);} al_DeleteSources(1,&mus.src); mus.src=0; }
         if(mus.bufs[0]){ al_DeleteBuffers(4,mus.bufs); for(auto&b:mus.bufs)b=0; } if(mus.open){ ov_clear((OggVorbis_File*)mus.vf.data()); mus.open=false; } mus.eof=false; }
@@ -278,12 +279,20 @@ void Sound::musicTick(const std::string&prefix,bool creative,float dt){
     std::vector<const std::vector<fs::path>*> pool; const std::string pre=prefix+".";
     for(auto&kv:I.index.events){ const std::string&k=kv.first; if(k.compare(0,pre.size(),pre)!=0)continue; const std::string rest=k.substr(pre.size());
         if(rest.find('.')==std::string::npos||(creative&&k==prefix+".creative.creative"))pool.push_back(&kv.second); }
+    for(auto&kv:I.index.events)if(kv.first==prefix)pool.push_back(&kv.second);   // e.g. a single event called exactly "music.end"
     if(pool.empty()){ M.wait=30; return; }
     for(int tries=0;tries<4;tries++){ const auto&files=*pool[std::uniform_int_distribution<size_t>(0,pool.size()-1)(rng)]; const fs::path&f=files[std::uniform_int_distribution<size_t>(0,files.size()-1)(rng)];
-        if(f.string()==M.last&&tries<3)continue; if(I.musicStart(f)){ M.last=f.string(); return; } }
+        if(f.string()==M.last&&tries<3)continue; if(I.musicStart(f)){ M.last=f.string(); std::string nm=f.stem().string(); while(!nm.empty()&&std::isdigit((unsigned char)nm.back()))nm.pop_back(); for(auto&ch:nm)if(ch=='_')ch=' '; bool up=true; for(auto&ch:nm){ if(up&&std::isalpha((unsigned char)ch))ch=(char)std::toupper((unsigned char)ch); up=(ch==' '); } I.nowPlaying=nm; return; } }
     M.wait=30;
 #else
     (void)prefix;(void)creative;(void)dt;
+#endif
+}
+std::string Sound::takeNowPlaying(){
+#if OPENAL_AVAILABLE
+    if(!m_impl)return {}; std::string r; r.swap(m_impl->nowPlaying); return r;
+#else
+    return {};
 #endif
 }
 void Sound::shutdown() {

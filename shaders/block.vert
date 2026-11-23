@@ -7,10 +7,12 @@ layout(location=2) in vec3 inOrigin;
 layout(location=0) out vec2 uv;
 layout(location=1) flat out uint texId;
 layout(location=2) flat out float shade;
-layout(push_constant) uniform PC { mat4 vp; } pc;
+layout(location=3) out vec3 rel;   // camera-relative position (for the fog)
+layout(push_constant) uniform PC { mat4 vp; vec4 fogColor; vec4 fogParams; } pc;
 const float SHADE[6] = float[6](0.431, 1.0, 0.686, 0.686, 0.843, 0.843);
 void main(){
     vec3 p = vec3(float(inA & 511u), float(((inA >> 18) & 4095u) | ((inB >> 31) << 12)), float((inA >> 9) & 511u)) / 16.0 + inOrigin;   // y has 13 bits (384 blocks tall world)
+    rel = p;
     gl_Position = pc.vp * vec4(p, 1.0);
     uv = vec2(float(inB & 511u), float((inB >> 9) & 511u)) / 16.0;
     texId = (inB >> 18) & 4095u;

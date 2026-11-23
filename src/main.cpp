@@ -49,10 +49,10 @@ int main(int argc,char**argv){
   bool fallback=false;
   {
    Game game(window);
-   if(!game.loadResources()){std::cerr<<"Could not load the texture pack (put minecraft-assets.zip into the hypervox data folder and restart).\n";rc=1;}
+   if(!game.loadResources()){std::cerr<<"Could not load the texture pack (put hypervox_assets.zip into the hypervox data folder and restart).\n";rc=1;}
    else{
     std::unique_ptr<Renderer> renderer; if(tryGL)renderer=std::make_unique<GlRenderer>(); else renderer=std::make_unique<VulkanRenderer>();
-    renderer->setVsync(game.settings().vsync); renderer->setMipmaps(game.settings().mipmaps);
+    renderer->setVsync(game.settings().vsync); renderer->setMipmaps(game.settings().mipmaps); renderer->setChunkMemory(game.settings().renderDistance);
     if(!renderer->init(window,game.blockAtlas(),game.uiAtlasImage(),game.panorama())){
      std::cerr<<renderer->name()<<" initialization failed.\n"; renderer->shutdown(); renderer.reset();
      if(!tryGL)fallback=true;                                       // retry the whole start-up with OpenGL

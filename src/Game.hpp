@@ -1,4 +1,5 @@
 #pragma once
+#include <unordered_set>
 #include <GLFW/glfw3.h>
 #include <map>
 #include <deque>
@@ -10,6 +11,7 @@
 #include "Assets.hpp"
 #include "Inventory.hpp"
 #include "Registry.hpp"
+#include "Entity.hpp"
 #include "SaveGame.hpp"
 #include "Settings.hpp"
 #include "Streamer.hpp"
@@ -77,7 +79,19 @@ private:
  std::vector<std::filesystem::path> dropped_; std::string noticeMsg_; double noticeUntil_=0;
  std::vector<std::string> skinIds_; std::vector<std::string> skinNames_; std::map<std::string,AtlasImage> skinCache_; int skinScroll_=0; bool editingName_=false; bool panoRotDone_=false; int panoRot_[2]{0,0};
  int food_=20; float sat_=5.f,exh_=0.f,healAcc_=0.f,starveAcc_=0.f,eatProg_=0.f; Vec3 lastPos_{}; struct Container{ InvSlot s[27]; float burn=0.f,burnMax=0.f,cook=0.f; int kind=0; };   // kind 0 chest, 1 furnace (slots 0 input, 1 fuel, 2 output)
- std::unordered_map<uint64_t,Container> containers_; uint64_t guiKey_=0; std::string guiBlock_; InvSlot craft_[9];
+ std::unordered_map<uint64_t,Container> containers_; Container ender_; static constexpr uint64_t kEnderKey=0xFFFFFFFFFFFFFFFFull; Container&guiContainer(){ return guiKey_==kEnderKey?ender_:containers_[guiKey_]; }   // the ender chest is one shared inventory per player
+ int dragBtn_=0; std::vector<InvSlot*> dragPtrs_; double lastClickT_=-1; int lastClickHov_=-1;   // inventory drag / double click state
+ void pollLootChests();
+ // ---- entities (GameEntities.cpp)
+ EntityMgr ents_; EntityEnv entEnv_; bool entInit_=false,riding_=false; float entAttackCd_=0; uint32_t entTarget_=0; std::unordered_map<ItemId,uint16_t> dynTile_; std::vector<ItemId> dynOwner_; size_t dynNext_=0; std::unordered_set<uint32_t> entUp_;
+ float frameMsAvg_=10.f,drawDist_=0.f; bool adaptiveDist_=true; float entAcc_=0.f,tps_=20.f,msptEma_=0.f,tickWin_=0.f; int tickCount_=0;   // 20 Hz tick loop + adaptive draw distance
+ std::vector<std::string> entityLines()const; void entitiesReset(const std::string&folder,int dim); void entitiesInit(); void entitiesUpdate(float dt,double now); void entitiesRender(double now); uint16_t itemSpriteTile(ItemId id);
+ void entityPre(const Vec3&eye,const Vec3&dir,bool creative,const UiInput&in,float dt); bool entityRightClick(const Vec3&eye,const Vec3&dir,bool click);
+ void explodeAt(const Vec3&p,float power,bool breakBlocks,uint32_t src); void drawBossBar(); uint64_t guiKey_=0; std::string guiBlock_; InvSlot craft_[9];
+ // dimensions: nether / end through Steel, portals, travel
+ double portalCool_=0,portalT_=0,ambMood_=20,ambAdd_=10; void switchDimension(int dim); void travelTo(int dim); void updatePortals(float dt); bool tryLightNetherPortal(int fx,int fy,int fz); bool tryEyeOnFrame(int x,int y,int z); void buildNetherPortal(int x,int y,int z); bool findPortalNear(int x,int z,int&ox,int&oy,int&oz); int safeY(int x,int z,int lo,int hi); void ensureEndExit();
+ void fillChestLoot(Container&c,int x,int y,int z); void markPlayerChest(int x,int y,int z);   // chests that came with the terrain get loot on first opening
+ std::future<std::string> locateFut_; double tickAcc_=0; unsigned long long gameTicks_=0; int stepTicks_=0; void onTick();
  static uint64_t ckey(int x,int y,int z){return (uint64_t(uint32_t(x)&0x3FFFFFFu)<<38)|(uint64_t(uint32_t(z)&0x3FFFFFFu)<<12)|uint64_t(uint32_t(y)&0xFFFu);}
  bool tryOpenGui(int x,int y,int z); void closeGui(); void screenChest(); void screenCrafting(); void screenGeneric(); void guiInventoryCraft(float px,float py);
  // toasts (top-right pop-ups) and the recipe book
@@ -85,7 +99,7 @@ private:
  std::deque<Toast> toasts_; std::set<std::string> unlocked_; bool unlockedInit_=false,bookOpen_=false; double nextUnlockScan_=0; int bookScroll_=0;
  void pushToast(const std::string&title,const std::string&line,ItemId icon,int kind); void drawToasts();
  void updateRecipeUnlocks(); void loadRecipeBook(const std::string&folder); void saveRecipeBook(); void drawRecipeBook(float px,float py,bool big); void screenFurnace(); void tickFurnaces(float dt); void guiPlayerSlots(float px,float py,float y0,std::vector<std::pair<InvSlot*,std::pair<float,float>>>&out); void dropContainer(int x,int y,int z);
- void saveContainers(const std::unordered_map<uint64_t,Container>&m,const std::filesystem::path&file)const; void loadContainers(const std::string&folder); void guiSlotsUi(std::vector<std::pair<InvSlot*,std::pair<float,float>>>&slots,int outputIdx,bool craftOut);
+ void saveContainers(const std::unordered_map<uint64_t,Container>&m,const std::filesystem::path&file)const; void loadContainers(const std::string&folder,int dim=0); void guiSlotsUi(std::vector<std::pair<InvSlot*,std::pair<float,float>>>&slots,int outputIdx,bool craftOut);
  bool newDebug_=false; int newTerrain_=0; void hungerTick(float dt,double now,bool sprinting,bool jumped);
  float health_=20.f,fallPeak_=0.f,eyeH_=1.62f,regenAcc_=0.f; bool dead_=false,wasGround_=true,sneakEdge_=false,inFluidNow_=false,clickGuard_=true,skipTyped_=false,memPressure_=false; double lavaTick_=0,timeAcc_=0,lastMemCheck_=0,lastTrim_=0; int rssMB_=0,sugSel_=0; uint16_t waterId_=0,lavaId_=0;
  std::vector<UiVertex> skyVerts_;
@@ -99,7 +113,7 @@ private:
  bool keyPrev_[GLFW_KEY_LAST+1]{}; bool mousePrev_[3]{}; float scroll_=0; std::string typed_; double bsNext_=0; bool bsPrev_=false; bool mouseInit_=false; double lastMX_=0,lastMY_=0;
  double lastTime_=0,fpsAcc_=0,time_=0; int fpsFrames_=0,fpsShown_=0;
  // player
- WorldInfo cur_; Vec3 pos_{0,80,0},vel_{}; float yaw_=0,pitch_=0; bool onGround_=false,flying_=false; double lastJumpPress_=-10; float breakCd_=0,placeCd_=0; Hit hit_;
+ WorldInfo cur_; Vec3 pos_{0,80,0},vel_{}; float yaw_=0,pitch_=0; bool onGround_=false,flying_=false; float specSpeed_=1.f; double lastGrow_=-100.0; double lastJumpPress_=-10; float breakCd_=0,placeCd_=0; Hit hit_;
  double itemNameUntil_=0; int lastSelected_=-1; double lastSave_=0;
  // gui state
  Chat chat_; double chatFadeUntil_=0;

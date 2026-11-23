@@ -1,9 +1,8 @@
 # HyperVox — A C++ Minecraft clone built around performance 
 
 ## setup
-1. Put `minecraft-sounds.zip` into `assets/` (optional — audio)
-2. Run `install_and_build_linux.sh` and `build-steel.sh` (Linux) or `install_and_build_windows.bat` (Windows, run as admin)(wont work till steel is compiled to c++ in a later update)
-3. `./build/minecraft`
+1. Run `install_and_build_linux.sh` and `build-steel.sh` (Linux) or `install_and_build_windows.bat` (Windows, run as admin)(wont work till steel is compiled to c++ in a later update)
+2. `./build/minecraft`
 
 Manual: `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --build build`
 
@@ -27,13 +26,10 @@ Manual: `cmake -S . -B build -G Ninja -DCMAKE_BUILD_TYPE=Release && cmake --buil
 Saved in `worlds/<name>/` as real **Minecraft 26.3** Anvil files (`level.dat` + `region/*.mca`).  
 Worlds are openable in Minecraft — only edited chunks are written; terrain elsewhere is regenerated.
 
-## Resource packs
-Drop a pack folder into `<data dir>/resourcepacks/` then Options → Textures. Works with any 1.21.x pack.
-
 ## Data folder
-- **Linux:** `~/.local/share/HyperVox/`
-- **Windows:** `%APPDATA%\HyperVox\`
-- **Override:** set `HYPERVOX_HOME` environment variable
+- **Linux:** `~/.local/share/FastVoxelVK/`
+- **Windows:** `%APPDATA%\FastVoxelVK\`
+- **Override:** set `FASTVOXEL_HOME` environment variable
 
 
 ## Terrain

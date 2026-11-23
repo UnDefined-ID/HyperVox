@@ -31,6 +31,7 @@ bool VulkanRenderer::createDevice(){float pr=1;std::set<uint32_t> fam={graphicsF
 bool VulkanRenderer::createSwapchain(){VkSurfaceCapabilitiesKHR cap;vkGetPhysicalDeviceSurfaceCapabilitiesKHR(gpu,surface,&cap);uint32_t n=0;vkGetPhysicalDeviceSurfaceFormatsKHR(gpu,surface,&n,nullptr);std::vector<VkSurfaceFormatKHR>fs(n);vkGetPhysicalDeviceSurfaceFormatsKHR(gpu,surface,&n,fs.data());swapFormat=fs[0].format;VkColorSpaceKHR swapColorSpace=fs[0].colorSpace;for(auto&f:fs)if(f.format==VK_FORMAT_B8G8R8A8_SRGB&&f.colorSpace==VK_COLOR_SPACE_SRGB_NONLINEAR_KHR){swapFormat=f.format;swapColorSpace=f.colorSpace;break;}extent=cap.currentExtent;if(extent.width==UINT32_MAX){extent={1280,720};}uint32_t pn=0;vkGetPhysicalDeviceSurfacePresentModesKHR(gpu,surface,&pn,nullptr);std::vector<VkPresentModeKHR>pm(pn);vkGetPhysicalDeviceSurfacePresentModesKHR(gpu,surface,&pn,pm.data());VkPresentModeKHR mode=VK_PRESENT_MODE_FIFO_KHR;bool hasImm=false,hasMail=false;for(auto x:pm){if(x==VK_PRESENT_MODE_IMMEDIATE_KHR)hasImm=true;if(x==VK_PRESENT_MODE_MAILBOX_KHR)hasMail=true;}if(!vsync){if(hasImm)mode=VK_PRESENT_MODE_IMMEDIATE_KHR;else if(hasMail)mode=VK_PRESENT_MODE_MAILBOX_KHR;}std::cout<<"Present mode: "<<(mode==VK_PRESENT_MODE_IMMEDIATE_KHR?"IMMEDIATE (uncapped)":mode==VK_PRESENT_MODE_MAILBOX_KHR?"MAILBOX (uncapped)":"FIFO (vsync, capped to monitor refresh)")<<"\n";uint32_t count=std::max(cap.minImageCount+1,3u);if(cap.maxImageCount)count=std::min(count,cap.maxImageCount);VkSwapchainCreateInfoKHR ci{VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};ci.surface=surface;ci.minImageCount=count;ci.imageFormat=swapFormat;ci.imageColorSpace=swapColorSpace;ci.imageExtent=extent;ci.imageArrayLayers=1;ci.imageUsage=VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;uint32_t fam[]={graphicsFamily,presentFamily};if(graphicsFamily!=presentFamily){ci.imageSharingMode=VK_SHARING_MODE_CONCURRENT;ci.queueFamilyIndexCount=2;ci.pQueueFamilyIndices=fam;}else ci.imageSharingMode=VK_SHARING_MODE_EXCLUSIVE;ci.preTransform=cap.currentTransform;ci.compositeAlpha=VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;ci.presentMode=mode;ci.clipped=VK_TRUE;vkCheck(vkCreateSwapchainKHR(device,&ci,nullptr,&swapchain),"swapchain");vkGetSwapchainImagesKHR(device,swapchain,&n,nullptr);swapImages.resize(n);vkGetSwapchainImagesKHR(device,swapchain,&n,swapImages.data());swapViews.resize(n);for(size_t i=0;i<n;i++){VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};vi.image=swapImages[i];vi.viewType=VK_IMAGE_VIEW_TYPE_2D;vi.format=swapFormat;vi.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,1,0,1};vkCheck(vkCreateImageView(device,&vi,nullptr,&swapViews[i]),"view");}return true;}
 bool VulkanRenderer::createDepth(){VkImageCreateInfo i{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};i.imageType=VK_IMAGE_TYPE_2D;i.extent={extent.width,extent.height,1};i.mipLevels=1;i.arrayLayers=1;i.format=depthFormat;i.tiling=VK_IMAGE_TILING_OPTIMAL;i.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;i.usage=VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;i.samples=VK_SAMPLE_COUNT_1_BIT;i.sharingMode=VK_SHARING_MODE_EXCLUSIVE;vkCheck(vkCreateImage(device,&i,nullptr,&depthImage),"depth image");VkMemoryRequirements mr;vkGetImageMemoryRequirements(device,depthImage,&mr);VkMemoryAllocateInfo a{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};a.allocationSize=mr.size;a.memoryTypeIndex=findMemory(mr.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);vkCheck(vkAllocateMemory(device,&a,nullptr,&depthMemory),"depth memory");vkBindImageMemory(device,depthImage,depthMemory,0);VkImageViewCreateInfo v{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};v.image=depthImage;v.viewType=VK_IMAGE_VIEW_TYPE_2D;v.format=depthFormat;v.subresourceRange={VK_IMAGE_ASPECT_DEPTH_BIT,0,1,0,1};return vkCreateImageView(device,&v,nullptr,&depthView)==VK_SUCCESS;}
 bool VulkanRenderer::createRenderPass(){VkAttachmentDescription a{};a.format=swapFormat;a.samples=VK_SAMPLE_COUNT_1_BIT;a.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;a.storeOp=VK_ATTACHMENT_STORE_OP_STORE;a.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;a.finalLayout=VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;VkAttachmentDescription d{};d.format=depthFormat;d.samples=VK_SAMPLE_COUNT_1_BIT;d.loadOp=VK_ATTACHMENT_LOAD_OP_CLEAR;d.storeOp=VK_ATTACHMENT_STORE_OP_DONT_CARE;d.initialLayout=VK_IMAGE_LAYOUT_UNDEFINED;d.finalLayout=VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;VkAttachmentDescription at[]={a,d};VkAttachmentReference ar{0,VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};VkAttachmentReference dr{1,VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL};VkSubpassDescription s{};s.pipelineBindPoint=VK_PIPELINE_BIND_POINT_GRAPHICS;s.colorAttachmentCount=1;s.pColorAttachments=&ar;s.pDepthStencilAttachment=&dr;VkSubpassDependency dep{};dep.srcSubpass=VK_SUBPASS_EXTERNAL;dep.dstSubpass=0;dep.srcStageMask=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;dep.dstStageMask=VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT|VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;dep.dstAccessMask=VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT|VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;VkRenderPassCreateInfo ci{VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};ci.attachmentCount=2;ci.pAttachments=at;ci.subpassCount=1;ci.pSubpasses=&s;ci.dependencyCount=1;ci.pDependencies=&dep;return vkCreateRenderPass(device,&ci,nullptr,&renderPass)==VK_SUCCESS;}
+struct PushData{ Mat4 vp; float fogColor[4]; float fogParams[4]; };   // 96 bytes: matrix + fog colour + (start, end, on)
 static std::vector<char> loadSpv(const char*p){std::ifstream f(p,std::ios::binary|std::ios::ate);if(!f){ for(const char*pre:{"../","build/"}){ f.clear(); f.open(std::string(pre)+p,std::ios::binary|std::ios::ate); if(f)break; } } if(!f){ const char*b=std::strrchr(p,'/'); const EmbeddedBlob e=embeddedBlob(b?b+1:p); if(e.p)return std::vector<char>((const char*)e.p,(const char*)e.p+e.n); return{}; } size_t n=static_cast<size_t>(static_cast<std::streamoff>(f.tellg()));f.seekg(0);std::vector<char>b(n);f.read(b.data(),static_cast<std::streamsize>(n));return b;}
 bool VulkanRenderer::createFramebuffers(){framebuffers.resize(swapViews.size());for(size_t i=0;i<swapViews.size();i++){VkFramebufferCreateInfo f{VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};f.renderPass=renderPass;VkImageView at[]={swapViews[i],depthView};f.attachmentCount=2;f.pAttachments=at;f.width=extent.width;f.height=extent.height;f.layers=1;vkCheck(vkCreateFramebuffer(device,&f,nullptr,&framebuffers[i]),"fb");}return true;}
 bool VulkanRenderer::createCommandPool(){VkCommandPoolCreateInfo p{VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};p.queueFamilyIndex=graphicsFamily;p.flags=VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;vkCheck(vkCreateCommandPool(device,&p,nullptr,&commandPool),"pool");cmd.resize(framebuffers.size());VkCommandBufferAllocateInfo a{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};a.commandPool=commandPool;a.level=VK_COMMAND_BUFFER_LEVEL_PRIMARY;a.commandBufferCount=(uint32_t)cmd.size();return vkAllocateCommandBuffers(device,&a,cmd.data())==VK_SUCCESS;}
@@ -84,7 +85,7 @@ bool VulkanRenderer::createPipeline(){
  VkPipelineColorBlendStateCreateInfo cbs{VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};cbs.attachmentCount=1;cbs.pAttachments=&cb;
  VkDynamicState dyn[]={VK_DYNAMIC_STATE_VIEWPORT,VK_DYNAMIC_STATE_SCISSOR};
  VkPipelineDynamicStateCreateInfo dsi{VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};dsi.dynamicStateCount=2;dsi.pDynamicStates=dyn;
- VkPushConstantRange pc{VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(Mat4)};
+ VkPushConstantRange pc{VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(PushData)};
  VkPipelineLayoutCreateInfo pli{VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};pli.setLayoutCount=1;pli.pSetLayouts=&descLayout;pli.pushConstantRangeCount=1;pli.pPushConstantRanges=&pc;
  vkCheck(vkCreatePipelineLayout(device,&pli,nullptr,&pipelineLayout),"layout");
 
@@ -127,7 +128,7 @@ bool VulkanRenderer::createTexture(Tex&t,const uint8_t*rgba,uint32_t W,uint32_t 
  vkCheck(vkCreateImage(device,&i,nullptr,&t.img),"texture image");
  VkMemoryRequirements mr;vkGetImageMemoryRequirements(device,t.img,&mr);
  VkMemoryAllocateInfo a{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};a.allocationSize=mr.size;a.memoryTypeIndex=findMemory(mr.memoryTypeBits,VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
- vkCheck(vkAllocateMemory(device,&a,nullptr,&t.mem),"texture memory");vkBindImageMemory(device,t.img,t.mem,0);
+ t.bytes=mr.size; vkCheck(vkAllocateMemory(device,&a,nullptr,&t.mem),"texture memory");vkBindImageMemory(device,t.img,t.mem,0);
  VkCommandBuffer c=beginOnce();
  VkImageMemoryBarrier b1{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};b1.srcAccessMask=0;b1.dstAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;b1.oldLayout=VK_IMAGE_LAYOUT_UNDEFINED;b1.newLayout=VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;b1.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;b1.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;b1.image=t.img;b1.subresourceRange={VK_IMAGE_ASPECT_COLOR_BIT,0,lv,0,1};
  vkCmdPipelineBarrier(c,VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,VK_PIPELINE_STAGE_TRANSFER_BIT,0,0,nullptr,0,nullptr,1,&b1);
@@ -163,27 +164,48 @@ bool VulkanRenderer::reloadTextures(const AtlasImage&b,const AtlasImage&u,const 
 // ---------------------------------------------------------------------------------------------------------------------
 // chunk storage: two big persistently mapped arenas (vertices + 16-bit indices) with a free list
 // ---------------------------------------------------------------------------------------------------------------------
+bool VulkanRenderer::writeVertices(uint32_t vo,const Vertex*vp,uint32_t n){
+ const size_t bytes=(size_t)n*sizeof(Vertex);
+ if(!vtx.staged){ std::memcpy(vtx.mapped+(size_t)vo*sizeof(Vertex),vp,bytes); return true; }
+ const int f=(int)frame;
+ if(stageUsed[f]){ if(vkGetFenceStatus(device,inFlight[f])!=VK_SUCCESS){ stageBusy=true; return false; } stageHead[f]=0; stageUsed[f]=false; }   // the GPU has finished the copies recorded last time this slot was used
+ if(stageHead[f]+bytes>kStageBytes){ stageBusy=true; return false; }
+ std::memcpy(stageMap[f]+stageHead[f],vp,bytes);
+ VkBufferCopy cp{};cp.srcOffset=stageHead[f];cp.dstOffset=(VkDeviceSize)vo*sizeof(Vertex);cp.size=bytes; stageCopies[f].push_back(cp);
+ stageHead[f]+=(bytes+15)&~(size_t)15; return true;
+}
+uint32_t VulkanRenderer::chunkUnitsCapped(int rd){
+ VkPhysicalDeviceMemoryProperties mp;vkGetPhysicalDeviceMemoryProperties(gpu,&mp); VkDeviceSize vram=0; for(uint32_t i=0;i<mp.memoryHeapCount;i++)if(mp.memoryHeaps[i].flags&VK_MEMORY_HEAP_DEVICE_LOCAL_BIT)vram=std::max(vram,mp.memoryHeaps[i].size);
+ uint32_t units=chunkUnitsFor(rd); if(vram>0){ const uint64_t cap=(uint64_t)((double)vram*0.40/sizeof(Vertex)); if(units>cap)units=(uint32_t)cap; }
+ return std::max<uint32_t>(units,1u<<20);
+}
 bool VulkanRenderer::createArena(Arena&a,VkBufferUsageFlags usage,uint32_t units,uint32_t unitSize,uint32_t minUnits){
  VkPhysicalDeviceMemoryProperties mp;vkGetPhysicalDeviceMemoryProperties(gpu,&mp);
- const VkMemoryPropertyFlags want[2]={VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT|VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT};
- for(;units>=minUnits;units/=2){
-  VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};bi.size=(VkDeviceSize)units*unitSize;bi.usage=usage;bi.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
-  if(vkCreateBuffer(device,&bi,nullptr,&a.buf)!=VK_SUCCESS){a.buf=VK_NULL_HANDLE;continue;}
-  VkMemoryRequirements mr;vkGetBufferMemoryRequirements(device,a.buf,&mr);
-  for(int pass=0;pass<2&&!a.mem;pass++)for(uint32_t i=0;i<mp.memoryTypeCount;i++){
-   if(!(mr.memoryTypeBits&(1u<<i)))continue; if((mp.memoryTypes[i].propertyFlags&want[pass])!=want[pass])continue;
-   VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};ai.allocationSize=mr.size;ai.memoryTypeIndex=i;
-   if(vkAllocateMemory(device,&ai,nullptr,&a.mem)==VK_SUCCESS)break; a.mem=VK_NULL_HANDLE;
+ const VkMemoryPropertyFlags HV=VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT,HC=VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,DL=VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT;
+ // 0 = plain VRAM (filled through staging buffers: the GPU reads it at full speed), 1 = VRAM visible to the CPU (a small BAR window), 2 = system memory (the GPU then reads every vertex over PCIe: slow)
+ const VkMemoryPropertyFlags need[3]={DL,DL|HV|HC,HV|HC};
+ const uint32_t first=units;
+ for(int phase=0;phase<2;phase++){
+  for(units=first;units>=minUnits;units/=2){
+   VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};bi.size=(VkDeviceSize)units*unitSize;bi.usage=usage;bi.sharingMode=VK_SHARING_MODE_EXCLUSIVE;
+   if(vkCreateBuffer(device,&bi,nullptr,&a.buf)!=VK_SUCCESS){a.buf=VK_NULL_HANDLE;continue;}
+   VkMemoryRequirements mr;vkGetBufferMemoryRequirements(device,a.buf,&mr); int usedPass=-1;
+   for(int pass=(phase==0?0:2);pass<=(phase==0?1:2)&&!a.mem;pass++)for(uint32_t t=0;t<mp.memoryTypeCount;t++){
+    if(!(mr.memoryTypeBits&(1u<<t)))continue; const VkMemoryPropertyFlags fl=mp.memoryTypes[t].propertyFlags; if((fl&need[pass])!=need[pass])continue; if(pass==0&&(fl&HV))continue;
+    VkMemoryAllocateInfo ai{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};ai.allocationSize=mr.size;ai.memoryTypeIndex=t;
+    if(vkAllocateMemory(device,&ai,nullptr,&a.mem)==VK_SUCCESS){usedPass=pass;break;} a.mem=VK_NULL_HANDLE;
+   }
+   if(!a.mem){vkDestroyBuffer(device,a.buf,nullptr);a.buf=VK_NULL_HANDLE;continue;}
+   vkBindBufferMemory(device,a.buf,a.mem,0);
+   if(usedPass==0){ a.mapped=nullptr; a.staged=true; }
+   else { void*p=nullptr; if(vkMapMemory(device,a.mem,0,VK_WHOLE_SIZE,0,&p)!=VK_SUCCESS){vkFreeMemory(device,a.mem,nullptr);vkDestroyBuffer(device,a.buf,nullptr);a.mem=VK_NULL_HANDLE;a.buf=VK_NULL_HANDLE;continue;} a.mapped=(uint8_t*)p; a.staged=false; }
+   a.capacity=units;a.freeList.clear();a.freeList[0]=units; std::cout<<"Chunk buffer: "<<(units/1024*unitSize/1024)<<" MB in "<<(usedPass==0?"VRAM":usedPass==1?"VRAM (CPU visible window)":"SYSTEM MEMORY (slow, the GPU reads it over PCIe)")<<"\n"; return true;
   }
-  if(!a.mem){vkDestroyBuffer(device,a.buf,nullptr);a.buf=VK_NULL_HANDLE;continue;}
-  vkBindBufferMemory(device,a.buf,a.mem,0);
-  void*p=nullptr; if(vkMapMemory(device,a.mem,0,VK_WHOLE_SIZE,0,&p)!=VK_SUCCESS){vkFreeMemory(device,a.mem,nullptr);vkDestroyBuffer(device,a.buf,nullptr);a.mem=VK_NULL_HANDLE;a.buf=VK_NULL_HANDLE;continue;}
-  a.mapped=(uint8_t*)p;a.capacity=units;a.freeList.clear();a.freeList[0]=units;return true;
  }
  return false;
 }
 void VulkanRenderer::destroyArena(Arena&a){
- if(a.mem){vkUnmapMemory(device,a.mem);}if(a.buf)vkDestroyBuffer(device,a.buf,nullptr);if(a.mem)vkFreeMemory(device,a.mem,nullptr);a=Arena{};
+ if(a.mem&&a.mapped){vkUnmapMemory(device,a.mem);}if(a.buf)vkDestroyBuffer(device,a.buf,nullptr);if(a.mem)vkFreeMemory(device,a.mem,nullptr);a=Arena{};
 }
 bool VulkanRenderer::createHostBuffer(VkDeviceSize size,VkBufferUsageFlags usage,VkBuffer&b,VkDeviceMemory&m,void**mapped){
  createBuffer(size,usage,VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT|VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,b,m);
@@ -201,26 +223,25 @@ bool VulkanRenderer::createDynamicBuffers(){
 }
 
 static inline uint64_t chunkKey(int cx,int cz){return (static_cast<uint64_t>(static_cast<uint32_t>(cx))<<32)|static_cast<uint32_t>(cz);}
-void VulkanRenderer::retire(const GpuChunk&c){retired.push_back(Retired{c.vOff,c.vCnt,c.iOff,c.iCnt+c.tCnt,frameCounter});}
+void VulkanRenderer::retire(const GpuChunk&c){retired.push_back(Retired{c.vOff,c.vCnt,frameCounter});}
 void VulkanRenderer::collectRetired(){
  size_t w=0;
  for(size_t i=0;i<retired.size();i++){
   const Retired&r=retired[i];
-  if(frameCounter>=r.frame+3){vtx.release(r.vOff,r.vCnt);idx.release(r.iOff,r.iCnt);} else retired[w++]=r;
+  if(frameCounter>=r.frame+3){vtx.release(r.vOff,r.vCnt);} else retired[w++]=r;
  }
  retired.resize(w);
 }
 bool VulkanRenderer::upload(int cx,int cz,const ChunkMesh&m){
+ stageBusy=false;
  const uint64_t k=chunkKey(cx,cz); auto it=chunkIndex.find(k);
- if((m.indices.empty()&&m.tindices.empty())||m.vertices.size()>65535){ release(cx,cz); return true; }     // empty (or absurdly dense) chunk: nothing to draw
- const uint32_t vc=(uint32_t)m.vertices.size(),ic=(uint32_t)m.indices.size(),tc=(uint32_t)m.tindices.size();
+ if(m.vertices.empty()||m.vertices.size()>65535){ release(cx,cz); return true; }     // empty (or absurdly dense) chunk: nothing to draw
+ const uint32_t vc=(uint32_t)m.vertices.size();
  // New chunks may only fill the arena to 92%: the rest is reserved so an edited chunk (break / place) can always be re-uploaded.
- if(it==chunkIndex.end()&&(uint64_t(vtx.freeUnits())*100<uint64_t(vtx.capacity)*8||uint64_t(idx.freeUnits())*100<uint64_t(idx.capacity)*8))return false;
+ if(it==chunkIndex.end()&&uint64_t(vtx.freeUnits())*100<uint64_t(vtx.capacity)*8)return false;
  const uint32_t vo=vtx.alloc(vc); if(vo==UINT32_MAX)return false;
- const uint32_t io=idx.alloc(ic+tc); if(io==UINT32_MAX){vtx.release(vo,vc);return false;}
- std::memcpy(vtx.mapped+(size_t)vo*sizeof(Vertex),m.vertices.data(),(size_t)vc*sizeof(Vertex));
- uint16_t*dst=reinterpret_cast<uint16_t*>(idx.mapped)+io; for(uint32_t i=0;i<ic;i++)dst[i]=(uint16_t)m.indices[i]; for(uint32_t i=0;i<tc;i++)dst[ic+i]=(uint16_t)m.tindices[i];
- GpuChunk g{cx,cz,vo,vc,io,ic,tc,m.maxY};
+ if(!writeVertices(vo,m.vertices.data(),vc)){ vtx.release(vo,vc); return false; }
+ GpuChunk g{cx,cz,vo,vc,{},m.maxY}; for(int i=0;i<kBuckets;i++)g.end[i]=m.bucketEnd[i];
  if(it!=chunkIndex.end()){ retire(chunkList[it->second]); chunkList[it->second]=g; }
  else { chunkIndex[k]=(uint32_t)chunkList.size(); chunkList.push_back(g); }
  return true;
@@ -230,6 +251,28 @@ void VulkanRenderer::release(int cx,int cz){
  const uint32_t i=it->second; retire(chunkList[i]); chunkIndex.erase(it);
  if(i!=chunkList.size()-1){ chunkList[i]=chunkList.back(); chunkIndex[chunkKey(chunkList[i].cx,chunkList[i].cz)]=i; }
  chunkList.pop_back();
+}
+bool VulkanRenderer::uploadEntity(uint32_t id,float wx,float wy,float wz,float radius,const ChunkMesh&m){
+ if(m.vertices.empty()||m.vertices.size()>65535){ releaseEntity(id); return true; }
+ const uint32_t vc=(uint32_t)m.vertices.size(); const uint32_t vo=vtx.alloc(vc); if(vo==UINT32_MAX)return false;
+ if(!writeVertices(vo,m.vertices.data(),vc)){ vtx.release(vo,vc); return false; }
+ auto it=ents.find(id); if(it!=ents.end()) retired.push_back(Retired{it->second.vOff,it->second.vCnt,frameCounter});   // the GPU may still read last frame's copy
+ EntDraw d; d.vOff=vo;d.vCnt=vc;d.x=wx;d.y=wy;d.z=wz;d.r=radius; ents[id]=d; return true;
+}
+void VulkanRenderer::releaseEntity(uint32_t id){ auto it=ents.find(id); if(it==ents.end())return; retired.push_back(Retired{it->second.vOff,it->second.vCnt,frameCounter}); ents.erase(it); }
+void VulkanRenderer::clearEntities(){ for(auto&kv:ents)retired.push_back(Retired{kv.second.vOff,kv.second.vCnt,frameCounter}); ents.clear(); }
+bool VulkanRenderer::recreateChunkBuffer(uint32_t want){
+ vkDeviceWaitIdle(device); chunkList.clear(); ents.clear(); chunkIndex.clear(); retired.clear(); destroyArena(vtx); for(int i=0;i<2;i++){ stageCopies[i].clear(); stageHead[i]=0; stageUsed[i]=false; }
+ if(!createArena(vtx,VK_BUFFER_USAGE_VERTEX_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,want,sizeof(Vertex),512u*1024)){ std::cerr<<"Could not re-create the chunk buffer\n"; return false; }
+ std::cout<<"Chunk memory: "<<(vtx.capacity/1024*sizeof(Vertex)/1024)<<" MB vertices\n"; return true;
+}
+bool VulkanRenderer::resizeChunkMemory(int rdNew){
+ m_rd=rdNew; if(chunkUnitsCapped(rdNew)<=vtx.capacity)return false;
+ return recreateChunkBuffer(chunkUnitsCapped(rdNew+8));   // grow with headroom so dragging the slider does not re-allocate every step
+}
+bool VulkanRenderer::growChunkMemory(){
+ const uint32_t cap=40u*1024*1024; if(vtx.capacity>=cap)return false; const uint32_t want=std::min<uint32_t>(vtx.capacity+vtx.capacity/2,cap);
+ return recreateChunkBuffer(want);
 }
 void VulkanRenderer::clear(){ for(auto&c:chunkList)retire(c); chunkList.clear(); chunkIndex.clear(); }
 
@@ -251,24 +294,30 @@ void VulkanRenderer::record(VkCommandBuffer c,uint32_t image,const FrameParams&f
  VkClearValue cv[2]{};cv[0].color.float32[0]=0.45f;cv[0].color.float32[1]=0.65f;cv[0].color.float32[2]=0.95f;cv[0].color.float32[3]=1.0f;cv[1].depthStencil.depth=0.0f;cv[1].depthStencil.stencil=0;
  VkRenderPassBeginInfo rp{VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO};rp.renderPass=renderPass;rp.framebuffer=framebuffers[image];rp.renderArea.offset.x=0;rp.renderArea.offset.y=0;rp.renderArea.extent=extent;rp.clearValueCount=2;rp.pClearValues=cv;
  flushTileUpdates(c,(int)frame);   // animated textures: recorded into this frame, no GPU stall
+ if(vtx.staged&&!stageCopies[frame].empty()){   // chunk / entity vertices staged since the last frame: copied into VRAM here
+  vkCmdCopyBuffer(c,stageBuf[frame],vtx.buf,(uint32_t)stageCopies[frame].size(),stageCopies[frame].data());
+  VkBufferMemoryBarrier br{VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER};br.srcAccessMask=VK_ACCESS_TRANSFER_WRITE_BIT;br.dstAccessMask=VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;br.srcQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;br.dstQueueFamilyIndex=VK_QUEUE_FAMILY_IGNORED;br.buffer=vtx.buf;br.offset=0;br.size=VK_WHOLE_SIZE;
+  vkCmdPipelineBarrier(c,VK_PIPELINE_STAGE_TRANSFER_BIT,VK_PIPELINE_STAGE_VERTEX_INPUT_BIT,0,0,nullptr,1,&br,0,nullptr);
+  stageCopies[frame].clear(); stageUsed[frame]=true; }
  vkCmdBeginRenderPass(c,&rp,VK_SUBPASS_CONTENTS_INLINE);
  VkViewport vpt{0.f,0.f,(float)extent.width,(float)extent.height,0.f,1.f};VkRect2D scr{{0,0},extent};
  vkCmdSetViewport(c,0,1,&vpt);vkCmdSetScissor(c,0,1,&scr);
  lastDrawn=0;
+ auto pushPC=[&](const Mat4&m,bool fog){ PushData pd{}; pd.vp=m; if(fog&&fp.fogEnd>0.f){ pd.fogColor[0]=fp.fogRGB[0];pd.fogColor[1]=fp.fogRGB[1];pd.fogColor[2]=fp.fogRGB[2]; pd.fogParams[0]=fp.fogStart;pd.fogParams[1]=fp.fogEnd;pd.fogParams[2]=1.f; } vkCmdPushConstants(c,pipelineLayout,VK_SHADER_STAGE_VERTEX_BIT|VK_SHADER_STAGE_FRAGMENT_BIT,0,sizeof(PushData),&pd); };
  if(uiSkyQuads){   // sky (gradient, stars, sun, moon) behind everything
   Mat4 sv;sv.m[0]=2.f/(float)extent.width;sv.m[5]=2.f/(float)extent.height;sv.m[12]=-1.f;sv.m[13]=-1.f;sv.m[15]=1.f;
   vkCmdBindPipeline(c,VK_PIPELINE_BIND_POINT_GRAPHICS,uiPipeline);
   VkDeviceSize o0=0;vkCmdBindVertexBuffers(c,0,1,&uiVB[frame],&o0);vkCmdBindIndexBuffer(c,uiIB,0,VK_INDEX_TYPE_UINT32);
-  vkCmdPushConstants(c,pipelineLayout,VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(Mat4),&sv);
+  pushPC(sv,false);
   vkCmdBindDescriptorSets(c,VK_PIPELINE_BIND_POINT_GRAPHICS,pipelineLayout,0,1,&uiSet,0,nullptr);
   vkCmdDrawIndexed(c,uiSkyQuads*6,1,0,0,0);
  }
  if(fp.world&&!chunkList.empty()){
   vkCmdBindPipeline(c,VK_PIPELINE_BIND_POINT_GRAPHICS,pipeline);
   vkCmdBindDescriptorSets(c,VK_PIPELINE_BIND_POINT_GRAPHICS,pipelineLayout,0,1,&descSet,0,nullptr);
-  vkCmdPushConstants(c,pipelineLayout,VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(Mat4),&fp.vp);
+  pushPC(fp.vp,true);
   VkBuffer bufs[2]={vtx.buf,instVB[frame]};VkDeviceSize offs[2]={0,0};
-  vkCmdBindVertexBuffers(c,0,2,bufs,offs);vkCmdBindIndexBuffer(c,idx.buf,0,VK_INDEX_TYPE_UINT16);
+  vkCmdBindVertexBuffers(c,0,2,bufs,offs);vkCmdBindIndexBuffer(c,quadIB,0,VK_INDEX_TYPE_UINT16);
   float*inst=static_cast<float*>(instMapped[frame]); uint32_t n=0;
   struct TV{float d;uint32_t gi,n;}; static std::vector<TV> visT; visT.clear();
   for(uint32_t gi=0;gi<(uint32_t)chunkList.size();gi++){
@@ -278,15 +327,22 @@ void VulkanRenderer::record(VkCommandBuffer c,uint32_t image,const FrameParams&f
    const float ox=float(g.cx*16)-fp.camera.x,oy=-fp.camera.y,oz=float(g.cz*16)-fp.camera.z;
    if(!aabbVisible(fp.vp,ox,oy,oz,ox+16.f,oy+float(g.maxY),oz+16.f))continue;
    inst[n*3]=ox;inst[n*3+1]=oy;inst[n*3+2]=oz;
-   if(g.iCnt)vkCmdDrawIndexed(c,g.iCnt,1,g.iOff,(int32_t)g.vOff,n);
-   if(g.tCnt){const float dx=ox+8.f,dz=oz+8.f;visT.push_back(TV{dx*dx+dz*dz,gi,n});}
+   // only the faces that can point at the camera are drawn (the others are back faces anyway)
+   forEachBucketRun(g.end,visibleBuckets(ox,oy,oz,g.maxY),[&](uint32_t first,uint32_t count){ vkCmdDrawIndexed(c,count/4*6,1,0,(int32_t)(g.vOff+first),n); });
+   if(g.end[7]>g.end[6]){const float dx=ox+8.f,dz=oz+8.f;visT.push_back(TV{dx*dx+dz*dz,gi,n});}
    n++;
+  }
+  for(const auto&kv:ents){   // entities (mobs, items, boats ...): each is a small mesh drawn like a chunk
+   const EntDraw&d=kv.second; if(n>=kMaxInstances)break;
+   const float ox=d.x-fp.camera.x,oy=d.y-fp.camera.y,oz=d.z-fp.camera.z; const float cx=ox+16.f,cy=oy+2.f,cz=oz+16.f;
+   if(!aabbVisible(fp.vp,cx-d.r,cy-d.r,cz-d.r,cx+d.r,cy+d.r,cz+d.r))continue;
+   inst[n*3]=ox;inst[n*3+1]=oy;inst[n*3+2]=oz; vkCmdDrawIndexed(c,d.vCnt/4*6,1,0,(int32_t)d.vOff,n); n++;
   }
   lastDrawn=n;
   if(!visT.empty()){   // translucent pass: far to near, alpha blended, no depth writes
    std::sort(visT.begin(),visT.end(),[](const TV&a,const TV&b){return a.d>b.d;});
    vkCmdBindPipeline(c,VK_PIPELINE_BIND_POINT_GRAPHICS,transPipeline);
-   for(const TV&t:visT){const GpuChunk&g=chunkList[t.gi]; vkCmdDrawIndexed(c,g.tCnt,1,g.iOff+g.iCnt,(int32_t)g.vOff,t.n);}
+   for(const TV&t:visT){const GpuChunk&g=chunkList[t.gi]; vkCmdDrawIndexed(c,(g.end[7]-g.end[6])/4*6,1,0,(int32_t)(g.vOff+g.end[6]),t.n);}
   }
  }
  if(fp.world&&fp.outline){
@@ -299,14 +355,14 @@ void VulkanRenderer::record(VkCommandBuffer c,uint32_t image,const FrameParams&f
    for(int i=0;i<12;i++)for(int k=0;k<2;k++){ for(int a2=0;a2<3;a2++)lv[vc*3+a2]=P[E[i][k]][a2]; vc++; } }
   vkCmdBindPipeline(c,VK_PIPELINE_BIND_POINT_GRAPHICS,linePipeline);
   VkDeviceSize lo=0;vkCmdBindVertexBuffers(c,0,1,&lineVB[frame],&lo);
-  vkCmdPushConstants(c,pipelineLayout,VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(Mat4),&fp.vp);
+  pushPC(fp.vp,false);
   vkCmdDraw(c,(uint32_t)vc,1,0,0);
  }
  if(uiQuadCount){
   Mat4 uiVp;uiVp.m[0]=2.f/(float)extent.width;uiVp.m[5]=2.f/(float)extent.height;uiVp.m[12]=-1.f;uiVp.m[13]=-1.f;uiVp.m[15]=1.f;
   vkCmdBindPipeline(c,VK_PIPELINE_BIND_POINT_GRAPHICS,uiPipeline);
   VkDeviceSize off2=0;vkCmdBindVertexBuffers(c,0,1,&uiVB[frame],&off2);vkCmdBindIndexBuffer(c,uiIB,0,VK_INDEX_TYPE_UINT32);
-  vkCmdPushConstants(c,pipelineLayout,VK_SHADER_STAGE_VERTEX_BIT,0,sizeof(Mat4),&uiVp);
+  pushPC(uiVp,false);
   if(uiPanoQuads){
    vkCmdBindDescriptorSets(c,VK_PIPELINE_BIND_POINT_GRAPHICS,pipelineLayout,0,1,&panoSet,0,nullptr);
    vkCmdDrawIndexed(c,uiPanoQuads*6,1,uiSkyQuads*6,0,0);
@@ -341,15 +397,17 @@ bool VulkanRenderer::init(GLFWwindow*w,const AtlasImage&blk,const AtlasImage&ui,
  try{
   if(!createInstance()||!createSurface()||!pickDevice()||!createDevice()||!createSwapchain()||!createDepth()||!createRenderPass()||!createDescriptors()||!createPipeline()||!createFramebuffers()||!createCommandPool())return false;
   if(!createTextures(blk,ui,pano))return false;
-  if(!createArena(vtx,VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,16u*1024*1024,sizeof(Vertex),512u*1024)){std::cerr<<"Could not allocate chunk vertex memory\n";return false;}
-  if(!createArena(idx,VK_BUFFER_USAGE_INDEX_BUFFER_BIT,24u*1024*1024,sizeof(uint16_t),768u*1024)){std::cerr<<"Could not allocate chunk index memory\n";return false;}
-  std::cout<<"Chunk memory: "<<(vtx.capacity/1024*sizeof(Vertex)/1024)<<" MB vertices, "<<(idx.capacity/1024*sizeof(uint16_t)/1024)<<" MB indices\n";
+  if(!createArena(vtx,VK_BUFFER_USAGE_VERTEX_BUFFER_BIT|VK_BUFFER_USAGE_TRANSFER_DST_BIT,chunkUnitsCapped(m_rd),sizeof(Vertex),512u*1024)){std::cerr<<"Could not allocate chunk vertex memory\n";return false;}
+  if(vtx.staged){ for(int i=0;i<2;i++){ void*mp=nullptr; if(!createHostBuffer(kStageBytes,VK_BUFFER_USAGE_TRANSFER_SRC_BIT,stageBuf[i],stageMem[i],&mp)){ std::cerr<<"Could not allocate the upload staging buffer\n"; return false; } stageMap[i]=(uint8_t*)mp; } }
+  { std::vector<uint16_t> qi; qi.reserve(16384*6); for(uint32_t q=0;q<16384;q++){ const uint16_t b0=(uint16_t)(q*4); qi.insert(qi.end(),{b0,(uint16_t)(b0+1),(uint16_t)(b0+2),b0,(uint16_t)(b0+2),(uint16_t)(b0+3)}); }
+    if(!uploadToDevice(qi.data(),qi.size()*sizeof(uint16_t),VK_BUFFER_USAGE_INDEX_BUFFER_BIT,quadIB,quadIM)){std::cerr<<"Could not create the quad index buffer\n";return false;} }
+  std::cout<<"Chunk memory: "<<(vtx.capacity/1024*sizeof(Vertex)/1024)<<" MB vertices (no per-chunk index data)\n";
   if(!createDynamicBuffers()||!createSync())return false;
   return true;
  }catch(const std::exception&e){std::cerr<<e.what()<<"\n";return false;}
 }
 
-void VulkanRenderer::trim(){ for(auto it=retired.begin();it!=retired.end();){ if(frameCounter>=it->frame+3){vtx.release(it->vOff,it->vCnt);idx.release(it->iOff,it->iCnt);it=retired.erase(it);} else ++it; } }   // never waits for the GPU
+void VulkanRenderer::trim(){ for(auto it=retired.begin();it!=retired.end();){ if(frameCounter>=it->frame+3){vtx.release(it->vOff,it->vCnt);it=retired.erase(it);} else ++it; } }   // never waits for the GPU
 void VulkanRenderer::draw(const FrameParams&fp,const UiVertex*ui,uint32_t skyQuads,uint32_t panoQuads,uint32_t totalQuads){
  if(swapDirty){swapDirty=false;recreate();}
  vkWaitForFences(device,1,&inFlight[frame],VK_TRUE,UINT64_MAX);
@@ -373,7 +431,8 @@ void VulkanRenderer::shutdown(){
  vkDeviceWaitIdle(device);
  for(int i=0;i<2;i++){ if(tileBuf[i])vkDestroyBuffer(device,tileBuf[i],nullptr); if(tileMem[i]){vkUnmapMemory(device,tileMem[i]);vkFreeMemory(device,tileMem[i],nullptr);} tileBuf[i]=VK_NULL_HANDLE;tileMem[i]=VK_NULL_HANDLE;tileMap[i]=nullptr; }
  for(int i=0;i<2&&i<(int)inFlight.size();i++){vkDestroyFence(device,inFlight[i],nullptr);vkDestroySemaphore(device,imageAvailable[i],nullptr);vkDestroySemaphore(device,renderFinished[i],nullptr);}
- destroyArena(vtx);destroyArena(idx);
+ for(int i=0;i<2;i++){ if(stageMem[i]){vkUnmapMemory(device,stageMem[i]);vkFreeMemory(device,stageMem[i],nullptr);stageMem[i]=VK_NULL_HANDLE;} if(stageBuf[i]){vkDestroyBuffer(device,stageBuf[i],nullptr);stageBuf[i]=VK_NULL_HANDLE;} }
+ destroyArena(vtx); if(quadIB)vkDestroyBuffer(device,quadIB,nullptr); if(quadIM)vkFreeMemory(device,quadIM,nullptr);
  destroyTexture(blockTex);destroyTexture(uiTex);destroyTexture(panoTex);
  for(int i=0;i<2;i++){
   if(uiVB[i])vkDestroyBuffer(device,uiVB[i],nullptr);if(uiVM[i])vkFreeMemory(device,uiVM[i],nullptr);

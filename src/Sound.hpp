@@ -9,7 +9,7 @@
 #include <queue>
 #include <unordered_map>
 
-// Plays .ogg/.wav files from minecraft-sounds.zip (or a pre-extracted folder).
+// Plays .ogg/.wav files from hypervox_sounds.zip (or a pre-extracted folder).
 // Uses OpenAL if available at runtime; falls back to a silent stub gracefully.
 // All public methods are thread-safe and no-op when audio is unavailable.
 class Sound {
@@ -29,6 +29,7 @@ public:
     // streamed background music: call every frame with "music.menu" (title screens), "music.game" (in a world) or "" (silence)
     void musicTick(const std::string& prefix, bool creative, float dt);
 
+    std::string takeNowPlaying();   // "" or the name of the track that started since the last call (for the "Now Playing" toast)
     bool available() const { return m_ok; }
     const std::filesystem::path& root() const { return m_root; }
 

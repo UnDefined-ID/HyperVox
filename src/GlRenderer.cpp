@@ -25,24 +25,25 @@ const char* kBlockVS=R"(#version 330 core
 layout(location=0) in uint inA;
 layout(location=1) in uint inB;
 uniform mat4 uVP; uniform vec3 uOrigin;
-out vec2 uv; flat out uint texId; flat out float shade;
+out vec2 uv; flat out uint texId; flat out float shade; out vec3 vRel;
 const float SHADE[6]=float[6](0.431,1.0,0.686,0.686,0.843,0.843);
 void main(){
  vec3 p=vec3(float(inA&511u),float(((inA>>18)&4095u)|((inB>>31)<<12)),float((inA>>9)&511u))/16.0+uOrigin;
- gl_Position=uVP*vec4(p,1.0);
+ vRel=p; gl_Position=uVP*vec4(p,1.0);
  uv=vec2(float(inB&511u),float((inB>>9)&511u))/16.0;
  texId=(inB>>18)&4095u;
  shade=SHADE[((inA>>30)&3u)|(((inB>>30)&1u)<<2)];
 })";
 const char* kBlockFS=R"(#version 330 core
-in vec2 uv; flat in uint texId; flat in float shade;
-out vec4 outColor; uniform sampler2D atlas;
+in vec2 uv; flat in uint texId; flat in float shade; in vec3 vRel;
+out vec4 outColor; uniform sampler2D atlas; uniform vec4 uFogColor; uniform vec4 uFogParams;
 void main(){
  const float TILES=64.0; float id=float(texId);
  vec2 cell=vec2(mod(id,TILES),floor(id/TILES));
  vec4 c=texture(atlas,(cell+fract(uv))/TILES);
  if(c.a<0.1) discard;
- outColor=vec4(c.rgb*shade,c.a);
+ float fog=uFogParams.z>0.5?clamp((length(vRel)-uFogParams.x)/max(uFogParams.y-uFogParams.x,0.001),0.0,1.0):0.0;
+ outColor=vec4(mix(c.rgb*shade,uFogColor.rgb,fog),c.a);
 })";
 const char* kUiVS=R"(#version 330 core
 layout(location=0) in vec2 inPos; layout(location=1) in vec2 inUV; layout(location=2) in vec4 inColor;
@@ -86,11 +87,13 @@ bool visible(const Mat4&m,float x0,float y0,float z0,float x1,float y1,float z1,
 bool GlRenderer::buildPrograms(){
  progBlock_=program(kBlockVS,kBlockFS); progUi_=program(kUiVS,kUiFS); progLine_=program(kLineVS,kLineFS);
  if(!progBlock_||!progUi_||!progLine_)return false;
- uBlockVP_=hvglGetUniformLocation(progBlock_,"uVP"); uBlockOrigin_=hvglGetUniformLocation(progBlock_,"uOrigin"); uBlockAtlas_=hvglGetUniformLocation(progBlock_,"atlas");
+ uBlockVP_=hvglGetUniformLocation(progBlock_,"uVP"); uBlockOrigin_=hvglGetUniformLocation(progBlock_,"uOrigin"); uBlockAtlas_=hvglGetUniformLocation(progBlock_,"atlas"); uFogColor_=hvglGetUniformLocation(progBlock_,"uFogColor"); uFogParams_=hvglGetUniformLocation(progBlock_,"uFogParams");
  uUiVP_=hvglGetUniformLocation(progUi_,"uVP"); uUiTex_=hvglGetUniformLocation(progUi_,"atlas"); uLineVP_=hvglGetUniformLocation(progLine_,"uVP");
  return true;
 }
+static size_t g_glTexBytes=0;
 static HVgluint makeTex(const uint8_t*rgba,uint32_t w,uint32_t h,bool linear,bool mips=false){
+ g_glTexBytes+=(size_t)w*h*4*(mips?4:3)/(mips?3:3);
  HVgluint t=0; hvglGenTextures(1,&t); hvglBindTexture(HVGL_TEXTURE_2D,t); hvglPixelStorei(HVGL_UNPACK_ALIGNMENT,1);
  if(mips){ std::vector<size_t> off; const std::vector<uint8_t> all=buildMipChain(rgba,w,h,5,off); for(int l=0;l<5;l++)hvglTexImage2D(HVGL_TEXTURE_2D,l,(HVglint)HVGL_SRGB8_ALPHA8,(HVglsizei)std::max(1u,w>>l),(HVglsizei)std::max(1u,h>>l),0,HVGL_RGBA,HVGL_UNSIGNED_BYTE,all.data()+off[l]); hvglTexParameteri(HVGL_TEXTURE_2D,HVGL_TEXTURE_MAX_LEVEL,4); }
  else hvglTexImage2D(HVGL_TEXTURE_2D,0,(HVglint)HVGL_SRGB8_ALPHA8,(HVglsizei)w,(HVglsizei)h,0,HVGL_RGBA,HVGL_UNSIGNED_BYTE,rgba);
@@ -106,6 +109,25 @@ bool GlRenderer::createTextures(const AtlasImage&b,const AtlasImage&u,const Pano
 }
 void GlRenderer::destroyTextures(){ HVgluint t[3]={texBlock_,texUi_,texPano_}; hvglDeleteTextures(3,t); texBlock_=texUi_=texPano_=0; }
 
+size_t GlRenderer::vramBytes()const{ return (size_t)vArena_.capacity*sizeof(Vertex)+196608+g_glTexBytes; }
+bool GlRenderer::uploadEntity(uint32_t id,float wx,float wy,float wz,float radius,const ChunkMesh&m){
+ if(m.vertices.empty()||m.vertices.size()>65535){ releaseEntity(id); return true; }
+ const uint32_t vc=(uint32_t)m.vertices.size(); const uint32_t vo=vArena_.alloc(vc); if(vo==UINT32_MAX)return false;
+ hvglBindBuffer(HVGL_ARRAY_BUFFER,vboChunk_); hvglBufferSubData(HVGL_ARRAY_BUFFER,(HVglintptr)vo*sizeof(Vertex),(HVglsizeiptr)vc*sizeof(Vertex),m.vertices.data());
+ auto it=ents_.find(id); if(it!=ents_.end())vArena_.release(it->second.vOff,it->second.vCnt);
+ EntDraw d; d.vOff=vo;d.vCnt=vc;d.x=wx;d.y=wy;d.z=wz;d.r=radius; ents_[id]=d; return true;
+}
+void GlRenderer::releaseEntity(uint32_t id){ auto it=ents_.find(id); if(it==ents_.end())return; vArena_.release(it->second.vOff,it->second.vCnt); ents_.erase(it); }
+void GlRenderer::clearEntities(){ for(auto&kv:ents_)vArena_.release(kv.second.vOff,kv.second.vCnt); ents_.clear(); }
+static void glRecreateChunkBuffer(HVgluint vbo,uint32_t bytesPerVertex,uint32_t units){ hvglBindBuffer(HVGL_ARRAY_BUFFER,vbo); hvglBufferData(HVGL_ARRAY_BUFFER,(HVglsizeiptr)units*bytesPerVertex,nullptr,HVGL_STATIC_DRAW); }
+bool GlRenderer::resizeChunkMemory(int rdNew){
+ m_rd=rdNew; if(chunkUnitsFor(rdNew)<=vArena_.capacity)return false; const uint32_t want=chunkUnitsFor(rdNew+8);
+ list_.clear(); index_.clear(); ents_.clear(); vArena_.init(want); glRecreateChunkBuffer(vboChunk_,sizeof(Vertex),want); return true;
+}
+bool GlRenderer::growChunkMemory(){
+ const uint32_t cap=40u*1024*1024; if(vArena_.capacity>=cap)return false; const uint32_t want=std::min<uint32_t>(vArena_.capacity+vArena_.capacity/2,cap);
+ list_.clear(); index_.clear(); ents_.clear(); vArena_.init(want); glRecreateChunkBuffer(vboChunk_,sizeof(Vertex),want); return true;
+}
 bool GlRenderer::init(GLFWwindow*w,const AtlasImage&blk,const AtlasImage&ui,const PanoramaImage&pano){
  win_=w; glfwMakeContextCurrent(w);
  if(!hvLoadGL()){std::cerr<<"OpenGL 3.3 functions are not available.\n";return false;}
@@ -118,12 +140,13 @@ bool GlRenderer::init(GLFWwindow*w,const AtlasImage&blk,const AtlasImage&ui,cons
  if(!buildPrograms())return false;
  if(!createTextures(blk,ui,pano))return false;
  // chunk arenas: one big vertex buffer + one 16-bit index buffer, sub-allocated with a free list
- vArena_.init(8u*1024*1024); iArena_.init(12u*1024*1024);
+ vArena_.init(chunkUnitsFor(m_rd));
  hvglGenVertexArrays(1,&vaoChunk_); hvglBindVertexArray(vaoChunk_);
  hvglGenBuffers(1,&vboChunk_); hvglBindBuffer(HVGL_ARRAY_BUFFER,vboChunk_); hvglBufferData(HVGL_ARRAY_BUFFER,(HVglsizeiptr)vArena_.capacity*sizeof(Vertex),nullptr,HVGL_STATIC_DRAW);
  hvglEnableVertexAttribArray(0); hvglVertexAttribIPointer(0,1,HVGL_UNSIGNED_INT,(HVglsizei)sizeof(Vertex),(const void*)0);
  hvglEnableVertexAttribArray(1); hvglVertexAttribIPointer(1,1,HVGL_UNSIGNED_INT,(HVglsizei)sizeof(Vertex),(const void*)4);
- hvglGenBuffers(1,&iboChunk_); hvglBindBuffer(HVGL_ELEMENT_ARRAY_BUFFER,iboChunk_); hvglBufferData(HVGL_ELEMENT_ARRAY_BUFFER,(HVglsizeiptr)iArena_.capacity*2,nullptr,HVGL_STATIC_DRAW);
+ { std::vector<uint16_t> qi; qi.reserve(16384*6); for(uint32_t q=0;q<16384;q++){ const uint16_t b0=(uint16_t)(q*4); qi.insert(qi.end(),{b0,(uint16_t)(b0+1),(uint16_t)(b0+2),b0,(uint16_t)(b0+2),(uint16_t)(b0+3)}); }   // one shared quad index buffer for every chunk
+  hvglGenBuffers(1,&iboChunk_); hvglBindBuffer(HVGL_ELEMENT_ARRAY_BUFFER,iboChunk_); hvglBufferData(HVGL_ELEMENT_ARRAY_BUFFER,(HVglsizeiptr)(qi.size()*2),qi.data(),HVGL_STATIC_DRAW); }
  // UI: dynamic vertex buffer + static quad index buffer
  hvglGenVertexArrays(1,&vaoUi_); hvglBindVertexArray(vaoUi_);
  hvglGenBuffers(1,&vboUi_); hvglBindBuffer(HVGL_ARRAY_BUFFER,vboUi_); hvglBufferData(HVGL_ARRAY_BUFFER,(HVglsizeiptr)kMaxUiQuads*4*sizeof(UiVertex),nullptr,HVGL_STREAM_DRAW);
@@ -148,26 +171,23 @@ void GlRenderer::updateTiles(const std::vector<TileUpdate>&t){
 }
 bool GlRenderer::upload(int cx,int cz,const ChunkMesh&m){
  const uint64_t k=ckey(cx,cz); auto it=index_.find(k);
- if((m.indices.empty()&&m.tindices.empty())||m.vertices.size()>65535){ release(cx,cz); return true; }
- const uint32_t vc=(uint32_t)m.vertices.size(),ic=(uint32_t)m.indices.size(),tc=(uint32_t)m.tindices.size();
- if(it==index_.end()&&(uint64_t(vArena_.freeUnits())*100<uint64_t(vArena_.capacity)*8||uint64_t(iArena_.freeUnits())*100<uint64_t(iArena_.capacity)*8))return false;   // keep 8% for re-meshing edited chunks
+ if(m.vertices.empty()||m.vertices.size()>65535){ release(cx,cz); return true; }
+ const uint32_t vc=(uint32_t)m.vertices.size();
+ if(it==index_.end()&&uint64_t(vArena_.freeUnits())*100<uint64_t(vArena_.capacity)*8)return false;   // keep 8% for re-meshing edited chunks
  const uint32_t vo=vArena_.alloc(vc); if(vo==UINT32_MAX)return false;
- const uint32_t io=iArena_.alloc(ic+tc); if(io==UINT32_MAX){vArena_.release(vo,vc);return false;}
- std::vector<uint16_t> idx16(ic+tc); for(uint32_t i=0;i<ic;i++)idx16[i]=(uint16_t)m.indices[i]; for(uint32_t i=0;i<tc;i++)idx16[ic+i]=(uint16_t)m.tindices[i];
  hvglBindBuffer(HVGL_ARRAY_BUFFER,vboChunk_); hvglBufferSubData(HVGL_ARRAY_BUFFER,(HVglintptr)vo*sizeof(Vertex),(HVglsizeiptr)vc*sizeof(Vertex),m.vertices.data());
- hvglBindBuffer(HVGL_ELEMENT_ARRAY_BUFFER,iboChunk_); hvglBufferSubData(HVGL_ELEMENT_ARRAY_BUFFER,(HVglintptr)io*2,(HVglsizeiptr)(ic+tc)*2,idx16.data());
- const GpuChunk g{cx,cz,vo,vc,io,ic,tc,m.maxY};
- if(it!=index_.end()){ GpuChunk&o=list_[it->second]; vArena_.release(o.vOff,o.vCnt); iArena_.release(o.iOff,o.iCnt+o.tCnt); o=g; }   // GL syncs buffer writes with queued draws itself
+ GpuChunk g{cx,cz,vo,vc,{},m.maxY}; for(int i=0;i<kBuckets;i++)g.end[i]=m.bucketEnd[i];
+ if(it!=index_.end()){ GpuChunk&o=list_[it->second]; vArena_.release(o.vOff,o.vCnt); o=g; }   // GL syncs buffer writes with queued draws itself
  else{ index_[k]=(uint32_t)list_.size(); list_.push_back(g); }
  return true;
 }
 void GlRenderer::release(int cx,int cz){
  auto it=index_.find(ckey(cx,cz)); if(it==index_.end())return; const uint32_t i=it->second; const GpuChunk&o=list_[i];
- vArena_.release(o.vOff,o.vCnt); iArena_.release(o.iOff,o.iCnt+o.tCnt); index_.erase(it);
+ vArena_.release(o.vOff,o.vCnt); index_.erase(it);
  if(i!=list_.size()-1){ list_[i]=list_.back(); index_[ckey(list_[i].cx,list_[i].cz)]=i; }
  list_.pop_back();
 }
-void GlRenderer::clear(){ for(auto&o:list_){vArena_.release(o.vOff,o.vCnt);iArena_.release(o.iOff,o.iCnt+o.tCnt);} list_.clear(); index_.clear(); }
+void GlRenderer::clear(){ for(auto&o:list_){vArena_.release(o.vOff,o.vCnt);} list_.clear(); index_.clear(); }
 
 void GlRenderer::draw(const FrameParams&fp,const UiVertex*ui,uint32_t skyQuads,uint32_t panoQuads,uint32_t totalQuads){
  if(!ok_)return;
@@ -184,8 +204,10 @@ void GlRenderer::draw(const FrameParams&fp,const UiVertex*ui,uint32_t skyQuads,u
  if(uq){ hvglBindVertexArray(vaoUi_); hvglBindBuffer(HVGL_ARRAY_BUFFER,vboUi_); hvglBufferData(HVGL_ARRAY_BUFFER,(HVglsizeiptr)kMaxUiQuads*4*sizeof(UiVertex),nullptr,HVGL_STREAM_DRAW); hvglBufferSubData(HVGL_ARRAY_BUFFER,0,(HVglsizeiptr)uq*4*sizeof(UiVertex),ui); }
  if(sq){ beginUi(); drawUi(texUi_,0,sq); }
  if(fp.world&&!list_.empty()){
-  hvglEnable(HVGL_DEPTH_TEST); hvglDepthFunc(clipControl_?HVGL_GREATER:HVGL_LESS); hvglEnable(HVGL_CULL_FACE); hvglCullFace(HVGL_BACK); hvglFrontFace(clipControl_?HVGL_CW:HVGL_CCW);   // with the Vulkan-style clip control (upper-left origin) the winding is inverted hvglDisable(HVGL_BLEND);
+  hvglEnable(HVGL_DEPTH_TEST); hvglDepthFunc(clipControl_?HVGL_GREATER:HVGL_LESS); hvglEnable(HVGL_CULL_FACE); hvglCullFace(HVGL_BACK); hvglFrontFace(clipControl_?HVGL_CW:HVGL_CCW);   // with the Vulkan-style clip control (upper-left origin) the winding is inverted
+  hvglDisable(HVGL_BLEND);
   hvglUseProgram(progBlock_); hvglUniformMatrix4fv(uBlockVP_,1,HVGL_FALSE,fp.vp.m); hvglUniform1i(uBlockAtlas_,0);
+  hvglUniform4f(uFogColor_,fp.fogRGB[0],fp.fogRGB[1],fp.fogRGB[2],1.f); hvglUniform4f(uFogParams_,fp.fogStart,fp.fogEnd,fp.fogEnd>0.f?1.f:0.f,0.f);
   hvglActiveTexture(HVGL_TEXTURE0); hvglBindTexture(HVGL_TEXTURE_2D,texBlock_);
   hvglBindVertexArray(vaoChunk_); hvglBindBuffer(HVGL_ARRAY_BUFFER,vboChunk_); hvglBindBuffer(HVGL_ELEMENT_ARRAY_BUFFER,iboChunk_);
   struct TV{float d;uint32_t gi;float ox,oy,oz;}; static std::vector<TV> vt; vt.clear(); uint32_t n=0;
@@ -194,15 +216,22 @@ void GlRenderer::draw(const FrameParams&fp,const UiVertex*ui,uint32_t skyQuads,u
    if(!chunkInRange(g.cx-fp.chunkX,g.cz-fp.chunkZ,fp.renderDist))continue;
    const float ox=float(g.cx*16)-fp.camera.x,oy=-fp.camera.y,oz=float(g.cz*16)-fp.camera.z;
    if(!visible(fp.vp,ox,oy,oz,ox+16.f,oy+float(g.maxY),oz+16.f,clipControl_))continue;
-   if(g.iCnt){ hvglUniform3f(uBlockOrigin_,ox,oy,oz); hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)g.iCnt,HVGL_UNSIGNED_SHORT,(const void*)((size_t)g.iOff*2),(HVglint)g.vOff); }
-   if(g.tCnt){ const float dx=ox+8.f,dz=oz+8.f; vt.push_back(TV{dx*dx+dz*dz,gi,ox,oy,oz}); }
+   { bool set=false; forEachBucketRun(g.end,visibleBuckets(ox,oy,oz,g.maxY),[&](uint32_t first,uint32_t count){   // only faces that can point at the camera
+      if(!set){ hvglUniform3f(uBlockOrigin_,ox,oy,oz); set=true; }
+      hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)(count/4*6),HVGL_UNSIGNED_SHORT,(const void*)0,(HVglint)(g.vOff+first)); }); }
+   if(g.end[7]>g.end[6]){ const float dx=ox+8.f,dz=oz+8.f; vt.push_back(TV{dx*dx+dz*dz,gi,ox,oy,oz}); }
    n++;
+  }
+  for(const auto&kv:ents_){   // entities: small meshes drawn like chunks
+   const EntDraw&d=kv.second; const float ox=d.x-fp.camera.x,oy=d.y-fp.camera.y,oz=d.z-fp.camera.z; const float cx=ox+16.f,cy=oy+2.f,cz=oz+16.f;
+   if(!visible(fp.vp,cx-d.r,cy-d.r,cz-d.r,cx+d.r,cy+d.r,cz+d.r,clipControl_))continue;
+   hvglUniform3f(uBlockOrigin_,ox,oy,oz); hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)(d.vCnt/4*6),HVGL_UNSIGNED_SHORT,(const void*)0,(HVglint)d.vOff); n++;
   }
   lastDrawn_=n;
   if(!vt.empty()){   // translucent pass: far to near, alpha blended, no depth writes
    std::sort(vt.begin(),vt.end(),[](const TV&a,const TV&b){return a.d>b.d;});
    hvglEnable(HVGL_BLEND); hvglBlendFuncSeparate(HVGL_SRC_ALPHA,HVGL_ONE_MINUS_SRC_ALPHA,HVGL_ONE,HVGL_ZERO); hvglDepthMask(HVGL_FALSE);
-   for(const TV&t:vt){ const GpuChunk&g=list_[t.gi]; hvglUniform3f(uBlockOrigin_,t.ox,t.oy,t.oz); hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)g.tCnt,HVGL_UNSIGNED_SHORT,(const void*)((size_t)(g.iOff+g.iCnt)*2),(HVglint)g.vOff); }
+   for(const TV&t:vt){ const GpuChunk&g=list_[t.gi]; hvglUniform3f(uBlockOrigin_,t.ox,t.oy,t.oz); hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)((g.end[7]-g.end[6])/4*6),HVGL_UNSIGNED_SHORT,(const void*)0,(HVglint)(g.vOff+g.end[6])); }
    hvglDepthMask(HVGL_TRUE); hvglDisable(HVGL_BLEND);
   }
  }

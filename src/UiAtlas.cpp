@@ -8,12 +8,12 @@
 namespace fs=std::filesystem;
 
 namespace{
-constexpr uint32_t kUiCacheVersion=9, kPanoCacheVersion=2;
+constexpr uint32_t kUiCacheVersion=10, kPanoCacheVersion=2;
 const char* kGuiSprites[]={
  "gui/sprites/widget/button","gui/sprites/widget/button_highlighted","gui/sprites/widget/button_disabled",
  "gui/sprites/widget/slider","gui/sprites/widget/slider_highlighted","gui/sprites/widget/slider_handle","gui/sprites/widget/slider_handle_highlighted",
  "gui/sprites/widget/text_field","gui/sprites/widget/text_field_highlighted",
- "gui/sprites/hud/hotbar","gui/sprites/hud/hotbar_selection",
+ "gui/sprites/hud/hotbar","gui/sprites/hud/hotbar_selection","gui/sprites/hud/hotbar_offhand_left",
  "gui/sprites/container/slot_highlight_back","gui/sprites/container/slot_highlight_front",
  "gui/sprites/container/creative_inventory/scroller","gui/sprites/container/creative_inventory/scroller_disabled",
  "gui/container/inventory","gui/container/creative_inventory/tab_items",
@@ -74,7 +74,8 @@ void UiAtlas::writeCache(const fs::path&f,uint64_t sig)const{
 const Sprite& UiAtlas::get(const std::string&k)const{auto it=m_sprites.find(k);return it==m_sprites.end()?m_white:it->second;}
 
 bool UiAtlas::load(const AssetPaths&assets,const TexturePack&pack,const fs::path&cacheDir){
- const uint64_t sig=assets.signature(kUiCacheVersion)^((uint64_t)Registry::get().blockCount()*0x9E3779B97F4A7C15ull)^((uint64_t)Registry::get().plainItemCount()<<20);
+ uint64_t texHash=1469598103934665603ull; { const Registry&R0=Registry::get(); for(BlockId b=1;b<R0.blockCount();b++){ const BlockInfo&bi=R0.info(b); for(int f:{1,3,5})texHash=(texHash^bi.texture[f])*1099511628211ull; } }   // the icons point at main atlas tiles: when the tile numbering changes the cached UI atlas must be rebuilt
+ const uint64_t sig=assets.signature(kUiCacheVersion)^((uint64_t)Registry::get().blockCount()*0x9E3779B97F4A7C15ull)^((uint64_t)Registry::get().plainItemCount()<<20)^texHash;
  const fs::path cacheFile=cacheDir/("ui_"+safeFileName(assets.packName)+".cache");
  if(readCache(cacheFile,sig)){m_fromCache=true;return true;}
  const Registry&R=Registry::get();

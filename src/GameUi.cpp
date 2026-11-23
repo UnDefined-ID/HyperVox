@@ -32,8 +32,12 @@ std::vector<std::string> Game::chatSuggest(size_t&tokStart)const{
  const std::string cur=lower(in.substr(tokStart)); const int argIdx=(int)std::count(in.begin(),in.end(),' ');
  std::string cmd; if(argIdx>0){ const size_t e=in.find(' '); cmd=lower(in.substr(1,e-1)); }
  std::vector<std::string> pool; const Registry&R=Registry::get();
- if(argIdx==0)pool={"clear","fly","gamemode","gamerule","gc","give","help","kill","seed","setblock","tick","time","tp"};
+ if(argIdx==0)pool={"clear","fly","gamemode","gamerule","gc","give","help","kill","locate","seed","setblock","summon","tick","time","tp","adaptive"};
  else if(cmd=="gamemode"&&argIdx==1)pool={"survival","creative","spectator"};
+ else if(cmd=="summon"&&argIdx==1)pool={"cow","pig","chicken","creeper","enderman","blaze","ender_dragon","end_crystal","boat","minecart","zombie","skeleton","spider","sheep","ghast","slime","wolf","villager"};
+ else if(cmd=="adaptive"&&argIdx==1)pool={"on","off"};
+ else if(cmd=="locate"&&argIdx==1)pool={"block","structure"};
+ else if(cmd=="locate"&&argIdx==2&&chat_.input().find("structure")!=std::string::npos)pool={"village","mineshaft","desert_pyramid","jungle_temple","stronghold","nether_fortress","bastion","end_city","ruined_portal","ancient_city","igloo","woodland_mansion","trial_chambers","ocean_monument","pillager_outpost","shipwreck","dungeon"};
  else if(cmd=="gamerule"){ if(argIdx==1)pool={"tickRate","doDaylightCycle","doWeatherCycle"}; else if(argIdx==2)pool={"true","false"}; }
  else if(cmd=="time"){ if(argIdx==1)pool={"set","add","query"}; else if(argIdx==2)pool={"day","noon","sunset","night","midnight"}; }
  else if(cmd=="tick"&&argIdx==1)pool={"freeze","unfreeze","step","rate"};
@@ -108,12 +112,17 @@ void Game::drawSlot(const InvSlot&s,float x,float y){
 }
 void Game::drawHud(){
  const float W=ui_.W(),H=ui_.H(),cx=std::floor(W/2),cy=std::floor(H/2);
+ drawBossBar();
+ if(inWorld_&&screen_==Screen::Play){   // underwater / in lava: tinted screen (the "fog" you see from inside the liquid)
+  const Registry&R=Registry::get(); const uint16_t eb=world_.get((int)std::floor(pos_.x),(int)std::floor(pos_.y+eyeH_),(int)std::floor(pos_.z));
+  if(eb){ const std::string en=R.blockName(R.baseOf(eb)); if(en=="water")ui_.rect(0,0,W,H,rgba(40,90,200,70)); else if(en=="lava")ui_.rect(0,0,W,H,rgba(255,90,0,200)); } }
  if(screen_==Screen::Play){   // crosshair
   ui_.rect(cx-5,cy-1,11,3,rgba(0,0,0,150)); ui_.rect(cx-1,cy-5,3,11,rgba(0,0,0,150)); ui_.rect(cx-4,cy,9,1,COL_WHITE); ui_.rect(cx,cy-4,1,9,COL_WHITE);
  }
  const float hx=std::floor((W-182)/2),hy=H-22;
  ui_.sprite(uiAtlas_.get("gui/sprites/hud/hotbar"),hx,hy,182,22);
  for(int i=0;i<9;i++)drawSlot(cur_.inv.s[i],hx+3+20*i,hy+3);
+ if(!cur_.inv.off.empty()){ const Sprite&oh=uiAtlas_.get("gui/sprites/hud/hotbar_offhand_left"); if(oh.valid())ui_.sprite(oh,hx-29,hy-1,29,24); else ui_.rect(hx-23,hy,22,22,rgba(40,40,40,200)); drawSlot(cur_.inv.off,hx-26,hy+3); }   // offhand
  ui_.sprite(uiAtlas_.get("gui/sprites/hud/hotbar_selection"),hx-1+20*cur_.inv.selected,hy-1,24,23);
  if(cur_.mode==MODE_SURVIVAL&&screen_==Screen::Play&&eatProg_>0.f){ const float bw=20.f,bx=std::floor(ui_.W()/2-bw/2),by=std::floor(ui_.H()/2)+10; ui_.rect(bx-1,by-1,bw+2,4,rgba(0,0,0,170)); ui_.rect(bx,by,bw*std::min(1.f,eatProg_/1.6f),2,rgba(255,200,80)); }
  if(cur_.mode==MODE_SURVIVAL&&screen_==Screen::Play&&breakProg_>0.f){ const float bw=20.f,bx=std::floor(ui_.W()/2-bw/2),by=std::floor(ui_.H()/2)+10; ui_.rect(bx-1,by-1,bw+2,4,rgba(0,0,0,170)); ui_.rect(bx,by,bw*std::min(1.f,breakProg_),2,rgba(235,235,235)); }
@@ -133,6 +142,8 @@ void Game::drawHud(){
   auto line=[&](const char*s){ui_.text(s,3,y,COL_WHITE);y+=10;};
   std::snprintf(b,sizeof b,"hypervox  %d fps",fpsShown_); line(b);
   std::snprintf(b,sizeof b,"XYZ: %.1f / %.1f / %.1f",pos_.x,pos_.y,pos_.z); line(b);
+  if(renderer_){ std::snprintf(b,sizeof b,"VRAM: %.0f MB tracked (chunk mesh %.0f of %.0f MB, rest textures + frame buffers)  RAM: %d MB",double(renderer_->vramBytes())/1048576.0,double(renderer_->vertexUsed())*8.0/1048576.0,double(renderer_->vertexCapacity())*8.0/1048576.0,rssMB_); line(b); }
+  { std::snprintf(b,sizeof b,"TPS: %.1f/20  MSPT: %.2f ms  entities: %d   draw distance: %d/%d%s",tps_,msptEma_,(int)ents_.list.size(),(int)std::lround(drawDist_),settings_.renderDistance,adaptiveDist_?" (auto)":""); line(b); }
   if(settings_.debugLevel>=2){
    { const std::string tl=std::string("Terrain: ")+steel::status(); line(tl.c_str()); }
   std::snprintf(b,sizeof b,"Chunks: %u drawn, %zu loaded, render distance %d%s",renderer_?renderer_->drawnChunks():0,streamer_?streamer_->meshedCount():size_t(0),settings_.renderDistance,streamer_&&streamer_->gpuFull()?" (GPU memory full)":""); line(b);
@@ -276,7 +287,7 @@ void Game::screenCreateWorld(){
  ui_.text(newMode_==MODE_CREATIVE?"Unlimited blocks, flying, instant building":"Collect blocks from the world",x,106,COL_GRAY);
  ui_.text("Seed (leave empty for random)",x,126,COL_GRAY); ui_.textField(2,x,138,200,20,newSeed_,24,focus_);
  if(ui_.button(x,164,200,20,std::string("World Type: ")+(newDebug_?"Debug (every block)":"Default")))newDebug_=!newDebug_;
- if(!newDebug_&&!steel::available())ui_.text(std::string("No Steel terrain: ")+steel::status(),x,192,0xFFFFAA55u);
+ if(!newDebug_&&!steel::available())ui_.text(std::string("No Steel terrain: ")+steel::status(),x,192,rgba(255,170,85));
  if(ui_.button(x,H-28,98,20,"Create World")){
   WorldInfo info; if(saves_.create(newName_.empty()?"New World":newName_,newDebug_?MODE_CREATIVE:newMode_,SaveManager::seedFromString(newSeed_),info)){ info.terrain=(!newDebug_&&newTerrain_)?2:1; if(newDebug_){info.debug=true;info.flying=true;} saves_.saveLevel(info); focus_=-1;startLoading(LoadTask::EnterWorld,&info);} else errorMsg_="Could not create the world folder";
  } else if(ui_.button(x+102,H-28,98,20,"Cancel")){focus_=-1;screen_=Screen::WorldSelect;}
@@ -297,7 +308,7 @@ void Game::screenOptions(){
  auto R=[&](int row){return y0+22.f*float(row);};   // compact rows: everything fits above Done even on the smallest window (240 gui px high)
  ui_.textCentered("Options",W/2,12); bool changed=false;
  float rd=float(settings_.renderDistance-Settings::kMinRender)/float(Settings::kMaxSlider-Settings::kMinRender); rd=std::clamp(rd,0.f,1.f);
- if(ui_.slider(1,lx,R(0),150,20,"Render Distance: "+std::to_string(settings_.renderDistance)+" chunks",rd)){settings_.renderDistance=Settings::kMinRender+(int)std::lround(rd*float(Settings::kMaxSlider-Settings::kMinRender));}
+ if(ui_.slider(1,lx,R(0),150,20,"Render Distance: "+std::to_string(settings_.renderDistance)+" chunks",rd)){settings_.renderDistance=Settings::kMinRender+(int)std::lround(rd*float(Settings::kMaxSlider-Settings::kMinRender)); if(renderer_&&renderer_->resizeChunkMemory(settings_.renderDistance)&&streamer_)streamer_->reset();}   // a bigger view needs a bigger GPU chunk buffer: re-created, chunks are streamed in again
  float fv=float(settings_.fov-30)/80.f; if(ui_.slider(2,rx,R(0),150,20,"FOV: "+std::to_string(settings_.fov),fv))settings_.fov=30+(int)std::lround(fv*80.f);
  if(ui_.slider(3,lx,R(1),150,20,"Sensitivity: "+std::to_string((int)std::lround(settings_.mouseSens*100))+"%",settings_.mouseSens)){}
  if(ui_.button(rx,R(1),150,20,std::string("VSync: ")+(settings_.vsync?"ON":"OFF"))){settings_.vsync=!settings_.vsync;if(renderer_)renderer_->setVsync(settings_.vsync);changed=true;}

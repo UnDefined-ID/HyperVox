@@ -8,7 +8,10 @@ static double nowSec(){return std::chrono::duration<double>(std::chrono::steady_
 
 ChunkStreamer::ChunkStreamer(World&w,ChunkSink&s):m_world(w),m_sink(s){
  unsigned hc=std::thread::hardware_concurrency(); unsigned n=hc>2?hc-1:1; n=std::min(n,8u);
- m_cap=std::max<size_t>(96,size_t(n)*24);
+#ifdef HV_LOW_MEMORY
+ n=1;   // console profile: one mesher thread (each one keeps a few MB of scratch)
+#endif
+ m_cap=std::max<size_t>(32,size_t(n)*6);   // fewer meshes in flight = less RAM (workers still always have a job queued)
  for(unsigned i=0;i<n;i++)m_threads.emplace_back([this]{worker();});
 }
 ChunkStreamer::~ChunkStreamer(){
@@ -82,11 +85,14 @@ void ChunkStreamer::scan(){
  std::vector<Job> jobs; jobs.reserve(m_cap);
  { std::lock_guard<std::mutex> l(m_mu);
    const size_t room=m_cap>m_inflight.size()?m_cap-m_inflight.size():0;
+   // two passes: what is inside the view cone first (closest first), only then the chunks behind you - so the terrain you are looking at appears first
    if(!m_gpuFull)
+   for(int pass=0;pass<2;pass++)
    for(auto&o:m_offsets){
     if(jobs.size()>=room)break;
     const int cx=m_cx+o.first,cz=m_cz+o.second; const uint64_t k=key(cx,cz);
-    if(m_paused||m_meshed.count(k)||m_inflight.count(k)||(fill>0.5f&&!wanted(cx,cz,false)))continue;
+    const bool vis=wanted(cx,cz,false); if((pass==0)!=vis)continue;
+    if(m_paused||m_meshed.count(k)||m_inflight.count(k)||(fill>0.5f&&!vis))continue;
     jobs.push_back(Job{cx,cz,0});
    }
    // replace the not-yet-started part of the queue with the new priority order (keep dirty re-meshes first)
@@ -111,6 +117,7 @@ void ChunkStreamer::pump(int maxUploads){
   if(!chunkInRange(r.cx-m_cx,r.cz-m_cz,m_r+2)||(m_sink.fillRatio()>0.6f&&!wanted(r.cx,r.cz,true)))continue;   // moved away / turned away meanwhile
   if(done>=maxUploads){later.push_back(std::move(r));continue;}
   if(m_sink.upload(r.cx,r.cz,r.mesh)){ m_meshed[k]=r.ver; done++; }
+  else if(m_sink.uploadBusy()){ later.push_back(std::move(r)); done=maxUploads; }   // staging buffer busy: retry next frame
   else { m_gpuFull=true; }                                        // GPU arena full: stop requesting more until something is freed
  }
  if(!later.empty()){ std::lock_guard<std::mutex> l(m_mu); for(auto&r:later)m_results.push_back(std::move(r)); }

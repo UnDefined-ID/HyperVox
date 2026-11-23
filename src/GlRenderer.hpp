@@ -27,6 +27,14 @@ public:
  uint32_t drawnChunks()const override{return lastDrawn_;}
  uint32_t vertexCapacity()const override{return vArena_.capacity;}
  uint32_t vertexUsed()const override{return vArena_.capacity-vArena_.freeUnits();}
+ bool resizeChunkMemory(int renderDist)override;
+ bool growChunkMemory()override;
+ bool uploadEntity(uint32_t id,float wx,float wy,float wz,float radius,const ChunkMesh&m)override;
+ void releaseEntity(uint32_t id)override;
+ void clearEntities()override;
+ struct EntDraw{ uint32_t vOff=0,vCnt=0; float x=0,y=0,z=0,r=1; };
+ std::unordered_map<uint32_t,EntDraw> ents_;
+ size_t vramBytes()const override;
 private:
  struct Arena{
   uint32_t capacity=0; std::map<uint32_t,uint32_t> freeList;
@@ -35,11 +43,11 @@ private:
   void release(uint32_t off,uint32_t n){ auto it=freeList.lower_bound(off); if(it!=freeList.begin()){auto p=std::prev(it);if(p->first+p->second==off){off=p->first;n+=p->second;freeList.erase(p);}} if(it!=freeList.end()&&off+n==it->first){n+=it->second;it=freeList.erase(it);} freeList[off]=n; }
   uint32_t freeUnits()const{uint32_t t=0;for(auto&kv:freeList)t+=kv.second;return t;}
  };
- struct GpuChunk{int cx,cz;uint32_t vOff,vCnt,iOff,iCnt,tCnt;int maxY;};
+ struct GpuChunk{int cx,cz;uint32_t vOff,vCnt;uint32_t end[kBuckets];int maxY;};   // vertices only; buckets as in ChunkMesh
  bool buildPrograms(); bool createTextures(const AtlasImage&b,const AtlasImage&u,const PanoramaImage&p); void destroyTextures();
  GLFWwindow* win_=nullptr; bool ok_=false,vsync_=false,lastVsync_=true,clipControl_=false;
  HVgluint progBlock_=0,progUi_=0,progLine_=0,texBlock_=0,texUi_=0,texPano_=0,vaoChunk_=0,vaoUi_=0,vaoLine_=0,vboChunk_=0,iboChunk_=0,vboUi_=0,iboUi_=0,vboLine_=0;
- HVglint uBlockVP_=-1,uBlockOrigin_=-1,uBlockAtlas_=-1,uUiVP_=-1,uUiTex_=-1,uLineVP_=-1;
- Arena vArena_,iArena_; std::vector<GpuChunk> list_; std::unordered_map<uint64_t,uint32_t> index_; uint32_t lastDrawn_=0;
+ HVglint uFogColor_=-1,uFogParams_=-1,uBlockVP_=-1,uBlockOrigin_=-1,uBlockAtlas_=-1,uUiVP_=-1,uUiTex_=-1,uLineVP_=-1;
+ Arena vArena_; std::vector<GpuChunk> list_; std::unordered_map<uint64_t,uint32_t> index_; uint32_t lastDrawn_=0;
  static constexpr uint32_t kMaxUiQuads=16384;
 };

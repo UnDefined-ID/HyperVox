@@ -1,3 +1,2 @@
-*.zip filter=lfs diff=lfs merge=lfs -text
-*.jar filter=lfs diff=lfs merge=lfs -text
+assets/hypervox_sounds.zip filter=lfs diff=lfs merge=lfs -text
 steel/steel-provider filter=lfs diff=lfs merge=lfs -text

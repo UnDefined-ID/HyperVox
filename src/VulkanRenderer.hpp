@@ -27,9 +27,23 @@ public:
  uint32_t drawnChunks()const override{return lastDrawn;}
  uint32_t vertexCapacity()const override{return vtx.capacity;}
  uint32_t vertexUsed()const override{return vtx.capacity-vtx.freeUnits();}
+ bool resizeChunkMemory(int renderDist)override;
+ bool growChunkMemory()override;
+ // chunk vertices live in real VRAM; uploads go through two host-visible staging buffers (one per frame in flight) and are copied by the GPU at the start of the frame
+ static constexpr VkDeviceSize kStageBytes=16u*1024*1024;
+ VkBuffer stageBuf[2]={VK_NULL_HANDLE,VK_NULL_HANDLE}; VkDeviceMemory stageMem[2]={VK_NULL_HANDLE,VK_NULL_HANDLE}; uint8_t* stageMap[2]={nullptr,nullptr}; VkDeviceSize stageHead[2]={0,0}; bool stageUsed[2]={false,false}; std::vector<VkBufferCopy> stageCopies[2];
+ bool writeVertices(uint32_t vo,const Vertex*v,uint32_t n); bool stageBusy=false; bool uploadBusy()const override{return stageBusy;}
+ uint32_t chunkUnitsCapped(int rd);
+ bool uploadEntity(uint32_t id,float wx,float wy,float wz,float radius,const ChunkMesh&m)override;
+ void releaseEntity(uint32_t id)override;
+ void clearEntities()override;
+ struct EntDraw{ uint32_t vOff=0,vCnt=0; float x=0,y=0,z=0,r=1; };
+ std::unordered_map<uint32_t,EntDraw> ents;
+ bool recreateChunkBuffer(uint32_t units);
+ size_t vramBytes()const override{ return (size_t)vtx.capacity*sizeof(Vertex)+196608+(size_t)blockTex.bytes+(size_t)uiTex.bytes+(size_t)panoTex.bytes+(size_t)extent.width*extent.height*4*(swapImages.size()+1); }
 private:
  struct Arena{
-  VkBuffer buf=VK_NULL_HANDLE; VkDeviceMemory mem=VK_NULL_HANDLE; uint8_t* mapped=nullptr; uint32_t capacity=0; std::map<uint32_t,uint32_t> freeList;
+  VkBuffer buf=VK_NULL_HANDLE; VkDeviceMemory mem=VK_NULL_HANDLE; uint8_t* mapped=nullptr; bool staged=false; uint32_t capacity=0; std::map<uint32_t,uint32_t> freeList;
   uint32_t alloc(uint32_t n){
    for(auto it=freeList.begin();it!=freeList.end();++it) if(it->second>=n){ uint32_t off=it->first,rem=it->second-n; freeList.erase(it); if(rem)freeList[off+n]=rem; return off; }
    return UINT32_MAX;
@@ -42,9 +56,9 @@ private:
   }
   uint32_t freeUnits()const{ uint32_t t=0; for(auto&kv:freeList)t+=kv.second; return t; }
  };
- struct Tex{ VkImage img=VK_NULL_HANDLE; VkDeviceMemory mem=VK_NULL_HANDLE; VkImageView view=VK_NULL_HANDLE; VkSampler sampler=VK_NULL_HANDLE; uint32_t levels=1; };
- struct GpuChunk{ int cx,cz; uint32_t vOff,vCnt,iOff,iCnt,tCnt; int maxY; };   // indices: [iOff,iOff+iCnt) opaque, then tCnt translucent
- struct Retired{ uint32_t vOff,vCnt,iOff,iCnt; uint64_t frame; };   // iCnt = opaque + translucent
+ struct Tex{ VkDeviceSize bytes=0; VkImage img=VK_NULL_HANDLE; VkDeviceMemory mem=VK_NULL_HANDLE; VkImageView view=VK_NULL_HANDLE; VkSampler sampler=VK_NULL_HANDLE; uint32_t levels=1; };
+ struct GpuChunk{ int cx,cz; uint32_t vOff,vCnt; uint32_t end[kBuckets]; int maxY; };   // vertices only (no index data): draw buckets end[] as in ChunkMesh, bucket 7 = translucent
+ struct Retired{ uint32_t vOff,vCnt; uint64_t frame; };
  static constexpr uint32_t kMaxUiQuads=16384, kMaxInstances=65536;
 
  GLFWwindow* m_window=nullptr; VkInstance instance=VK_NULL_HANDLE; VkSurfaceKHR surface=VK_NULL_HANDLE; VkPhysicalDevice gpu=VK_NULL_HANDLE; VkDevice device=VK_NULL_HANDLE; VkQueue graphicsQueue=VK_NULL_HANDLE,presentQueue=VK_NULL_HANDLE; uint32_t graphicsFamily=0,presentFamily=0;
@@ -55,7 +69,7 @@ private:
  VkCommandPool commandPool=VK_NULL_HANDLE; std::vector<VkCommandBuffer> cmd; std::vector<VkSemaphore> imageAvailable,renderFinished; std::vector<VkFence> inFlight; size_t frame=0;
  VkDescriptorSetLayout descLayout=VK_NULL_HANDLE; VkDescriptorPool descPool=VK_NULL_HANDLE; VkDescriptorSet descSet=VK_NULL_HANDLE,uiSet=VK_NULL_HANDLE,panoSet=VK_NULL_HANDLE;
  Tex blockTex,uiTex,panoTex;
- Arena vtx,idx; std::vector<GpuChunk> chunkList; std::unordered_map<uint64_t,uint32_t> chunkIndex; std::vector<Retired> retired; uint64_t frameCounter=0; uint32_t lastDrawn=0;
+ Arena vtx; VkBuffer quadIB=VK_NULL_HANDLE; VkDeviceMemory quadIM=VK_NULL_HANDLE;   /* ONE shared quad index buffer (0,1,2,0,2,3 pattern) for every chunk */ std::vector<GpuChunk> chunkList; std::unordered_map<uint64_t,uint32_t> chunkIndex; std::vector<Retired> retired; uint64_t frameCounter=0; uint32_t lastDrawn=0;
  VkBuffer uiVB[2]{VK_NULL_HANDLE,VK_NULL_HANDLE},uiIB=VK_NULL_HANDLE,instVB[2]{VK_NULL_HANDLE,VK_NULL_HANDLE},lineVB[2]{VK_NULL_HANDLE,VK_NULL_HANDLE};
  VkDeviceMemory uiVM[2]{VK_NULL_HANDLE,VK_NULL_HANDLE},uiIM=VK_NULL_HANDLE,instVM[2]{VK_NULL_HANDLE,VK_NULL_HANDLE},lineVM[2]{VK_NULL_HANDLE,VK_NULL_HANDLE};
  void *uiMapped[2]{nullptr,nullptr},*instMapped[2]{nullptr,nullptr},*lineMapped[2]{nullptr,nullptr};

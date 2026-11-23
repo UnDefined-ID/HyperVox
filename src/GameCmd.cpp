@@ -85,16 +85,61 @@ void Game::registerCommands() {
             chat_.sys("Set time to "+std::to_string(worldTime_%24000),now); return true;
         }
 
-        // /tick <rate|freeze|unfreeze|step>
+        // /tick <query|rate|freeze|unfreeze|step [n]>
         if(cmd=="tick") {
-            if(a.size()<2){chat_.sys("tickRate="+std::to_string((int)tickRate_),now);return true;}
-            if(a[1]=="freeze"){tickRate_=0;chat_.sys("Game frozen",now);}
-            else if(a[1]=="unfreeze"){tickRate_=20;chat_.sys("Game unpaused at 20 tps",now);}
-            else if(a[1]=="step"){worldTime_++;chat_.sys("Stepped 1 tick",now);}
-            else if(a[1]=="rate"||a[1]=="query"){
-                if(a.size()>=3){float v;if(parseFloat(a[2],v)){tickRate_=std::clamp(v,0.f,1000.f);chat_.sys("Tick rate: "+a[2],now);}else chat_.sys("Invalid",now);}
-                else chat_.sys("tickRate="+std::to_string((int)tickRate_),now);
-            }
+            auto q=[&]{ chat_.sys("Tick rate "+std::to_string((int)tickRate_)+" tps"+(tickRate_<=0?" (frozen)":"")+", tick "+std::to_string(gameTicks_)+", day time "+std::to_string(worldTime_%24000),now); };
+            if(a.size()<2||a[1]=="query"){q();return true;}
+            if(a[1]=="freeze"){tickRate_=0;chat_.sys("Game frozen (use /tick step)",now);}
+            else if(a[1]=="unfreeze"){tickRate_=20;chat_.sys("Game running at 20 tps",now);}
+            else if(a[1]=="step"){ int n=1; if(a.size()>=3&&!parseInt(a[2],n))n=1; n=std::clamp(n,1,10000); stepTicks_+=n; chat_.sys("Stepping "+std::to_string(n)+" tick(s)",now); }
+            else if(a[1]=="rate"){ float v; if(a.size()>=3&&parseFloat(a[2],v)){tickRate_=std::clamp(v,0.f,10000.f);chat_.sys("Tick rate set to "+a[2],now);} else q(); }
+            else chat_.sys("Usage: /tick <query|rate <n>|freeze|unfreeze|step [n]>",now);
+            return true;
+        }
+
+        // /dimension <overworld|nether|end>   (also: /dim)
+        if(cmd=="dimension"||cmd=="dim") {
+            if(a.size()<2){chat_.sys("You are in the "+std::string(world_.dimension()==0?"overworld":world_.dimension()==1?"nether":"end")+". Usage: /dimension <overworld|nether|end>",now);return true;}
+            const std::string t=a[1]; const int to=(t=="overworld"||t=="0")?0:(t=="nether"||t=="the_nether"||t=="1")?1:(t=="end"||t=="the_end"||t=="2")?2:-1;
+            if(to<0){chat_.sys("Unknown dimension: "+t,now);return true;}
+            if(to==world_.dimension()){chat_.sys("Already there",now);return true;}
+            chat_.sys("Travelling ...",now); travelTo(to); return true;
+        }
+
+        // /locate block <name> [radius in chunks]   (searches the terrain around you; structures / biomes need data the terrain helper does not give us)
+        if(cmd=="adaptive") { adaptiveDist_=!(a.size()>=2&&a[1]=="off"); if(a.size()>=2&&a[1]=="on")adaptiveDist_=true; chat_.sys(std::string("Adaptive draw distance: ")+(adaptiveDist_?"on (lowers the number of chunks drawn when the frame rate drops)":"off"),now); return true; }
+        if(cmd=="summon") {   // /summon <mob> [x y z]
+            static const std::vector<std::pair<std::string,EType>> kinds={{"cow",EType::Cow},{"pig",EType::Pig},{"chicken",EType::Chicken},{"creeper",EType::Creeper},{"enderman",EType::Enderman},{"blaze",EType::Blaze},{"ender_dragon",EType::Dragon},{"end_crystal",EType::Crystal},{"boat",EType::Boat},{"oak_boat",EType::Boat},{"minecart",EType::Minecart},{"zombie",EType::Zombie},{"skeleton",EType::Skeleton},{"spider",EType::Spider},{"sheep",EType::Sheep},{"ghast",EType::Ghast},{"slime",EType::Slime},{"wolf",EType::Wolf},{"villager",EType::Villager}};
+            if(a.size()<2){chat_.sys("Usage: /summon <cow|pig|chicken|creeper|enderman|blaze|ender_dragon|end_crystal|boat|minecart> [x y z]",now);return true;}
+            std::string tn=a[1]; if(tn.compare(0,10,"minecraft:")==0)tn=tn.substr(10); EType ty=EType::Count; for(auto&k:kinds)if(k.first==tn)ty=k.second;
+            if(ty==EType::Count){chat_.sys("Unknown entity: "+a[1],now);return true;}
+            Vec3 p{pos_.x-std::sin(yaw_)*-2.5f,pos_.y,pos_.z+std::cos(yaw_)*-2.5f}; if(a.size()>=5){ try{ p=Vec3{std::stof(a[2])+0.5f,std::stof(a[3]),std::stof(a[4])+0.5f}; }catch(...){} }
+            if(ty==EType::Dragon){ ents_.dragonSpawned=true; p.y+=25.f; } if(ty==EType::Ghast)p.y+=6.f;
+            { Entity&ne=ents_.spawn(ty,p); if(ty==EType::Slime){ ne.variant=2; ne.w=ne.h=1.04f; ne.health=ne.maxHealth=4.f; } } chat_.sys("Summoned "+tn,now); return true; }
+        if(cmd=="locate") {
+            std::vector<std::string> A=a;
+            // /locate structure <village|mineshaft|desert_pyramid|jungle_temple|stronghold|nether_fortress|bastion|end_city|ruined_portal|ancient_city|igloo|woodland_mansion|trial_chambers|shipwreck|...>: the terrain helper gives no structure positions,
+            // so the nearest tell-tale block of that structure is searched for instead.  Biomes are not available at all.
+            if(A.size()>=3&&A[1]=="biome"){chat_.sys("/locate biome is not available: the terrain helper does not expose biome data",now);return true;}
+            if(A.size()>=3&&A[1]=="structure"){ static const std::vector<std::pair<std::string,std::string>> tells={{"village","bell"},{"mineshaft","rail"},{"desert_pyramid","chiseled_sandstone"},{"jungle_temple","mossy_cobblestone"},{"stronghold","end_portal_frame"},{"fortress","nether_bricks"},{"nether_fortress","nether_bricks"},{"bastion","polished_blackstone_bricks"},{"bastion_remnant","polished_blackstone_bricks"},{"end_city","purpur_block"},{"ruined_portal","crying_obsidian"},{"ancient_city","sculk_catalyst"},{"igloo","snow_block"},{"mansion","dark_oak_planks"},{"woodland_mansion","dark_oak_planks"},{"trial_chambers","trial_spawner"},{"monument","prismarine_bricks"},{"ocean_monument","prismarine_bricks"},{"pillager_outpost","dark_oak_log"},{"dungeon","spawner"},{"shipwreck","chest"}};
+                std::string sn=A[2]; if(sn.compare(0,10,"minecraft:")==0)sn=sn.substr(10); std::string tell; for(auto&t:tells)if(t.first==sn)tell=t.second;
+                if(tell.empty()){chat_.sys("Unknown structure: "+A[2],now);return true;}
+                A[1]="block"; A[2]=tell; }
+            if(A.size()<3||A[1]!="block"){chat_.sys("Usage: /locate block <block> [radius]   or   /locate structure <name> [radius]",now);return true;}
+            if(locateFut_.valid()){chat_.sys("Still searching ...",now);return true;}
+            const Registry&R=Registry::get(); std::string nm=A[2]; if(nm.compare(0,10,"minecraft:")==0)nm=nm.substr(10); const BlockId want=R.baseOf(R.blockIdOrZero(nm));
+            if(!want){chat_.sys("Unknown block: "+A[2],now);return true;}
+            int rad=24; if(A.size()>=4)parseInt(A[3],rad); rad=std::clamp(rad,1,96);
+            const int pcx=(int)std::floor(pos_.x)>>4,pcz=(int)std::floor(pos_.z)>>4; const float px=pos_.x,pz=pos_.z; World*w=&world_;
+            chat_.sys("Searching for "+nm+" within "+std::to_string(rad)+" chunks (terrain is generated as needed) ...",now);
+            locateFut_=std::async(std::launch::async,[w,want,rad,pcx,pcz,px,pz,nm]()->std::string{
+                const Registry&R=Registry::get();
+                for(int r=0;r<=rad;r++)for(int dz=-r;dz<=r;dz++)for(int dx=-r;dx<=r;dx++){ if(std::max(std::abs(dx),std::abs(dz))!=r)continue;
+                    const auto c=w->acquire(pcx+dx,pcz+dz,false); const int top=std::min(c->maxY,Chunk::HEIGHT-1); long best=-1; int bx=0,by=0,bz=0;
+                    for(int y=0;y<=top;y++)for(int z=0;z<16;z++)for(int x=0;x<16;x++){ const uint16_t id=c->at(x,y,z); if(id&&R.baseOf(id)==want){ const int wx=(pcx+dx)*16+x,wz=(pcz+dz)*16+z; const long d=long(wx-px)*long(wx-px)+long(wz-pz)*long(wz-pz); if(best<0||d<best){best=d;bx=wx;by=y-Chunk::Y_OFFSET;bz=wz;} } }
+                    if(best>=0)return "Nearest "+nm+" is at "+std::to_string(bx)+" "+std::to_string(by)+" "+std::to_string(bz)+" ("+std::to_string((int)std::sqrt((double)best))+" blocks away)";
+                }
+                return "No "+nm+" found within "+std::to_string(rad)+" chunks"; });
             return true;
         }
 
@@ -135,7 +180,7 @@ void Game::registerCommands() {
 
         // /help
         if(cmd=="help"||cmd=="?") {
-            const char* cmds[]={"/tp x y z","/gamemode <survival|creative|spectator>","/gamerule [rule] [val]","/time <set|add|query> [val]","/tick [rate|freeze|unfreeze|step]","/give <item> [count]","/clear","/setblock x y z <block>","/kill","/seed","/fly"};
+            const char* cmds[]={"/tp x y z","/gamemode <survival|creative|spectator>","/gamerule [rule] [val]","/time <set|add|query> [val]","/tick [query|rate|freeze|unfreeze|step]","/locate block <name> [radius]","/dimension <overworld|nether|end>","/give <item> [count]","/clear","/setblock x y z <block>","/kill","/seed","/fly"};
             for(auto c:cmds) chat_.sys(c,now); return true;
         }
 
@@ -151,7 +196,7 @@ void Game::initSounds() {
         if(std::filesystem::exists(p)) { Sound::get().init(p); soundsLoaded_=true; return; }
     }
     // Sounds zip not extracted yet: try to extract if the zip is present
-    std::cout<<"[Sound] Put minecraft-sounds.zip into the hypervox data folder and restart to enable audio\n";
+    std::cout<<"[Sound] Put hypervox_sounds.zip into the hypervox data folder and restart to enable audio\n";
 }
 // sound pack groups: dig.* (break/place) and step.* use cloth coral grass gravel sand snow stone wet_grass wood
 std::string Game::soundGroup(BlockId b)const{
@@ -171,7 +216,7 @@ void Game::blockSound(BlockId b,int kind){
 void Game::playSound(const std::string& ev, float vol, float pitch) {
     if(soundsLoaded_) Sound::get().play(ev,vol,pitch);
 }
-void Game::tickSounds(float) {
+void Game::tickSounds(float dt) {
     if(!soundsLoaded_||!inWorld_) return;
     const Registry& R=Registry::get();
     const uint16_t atFeet=world_.get((int)std::floor(pos_.x),(int)std::floor(pos_.y+0.1f),(int)std::floor(pos_.z));
@@ -188,6 +233,12 @@ void Game::tickSounds(float) {
      sndWasGround_=onGround_;
     }
     lastSndPos_=pos_;
-    if(inWater) Sound::get().loop("ambient.underwater.loop",0.6f);
-    else        Sound::get().stopLoop("ambient.underwater.loop");
+    if(inWater){ Sound::get().loop("ambient.underwater.loop",0.6f); Sound::get().loop("ambient.underwater.underwater_ambience",0.5f); }
+    else { Sound::get().stopLoop("ambient.underwater.loop"); Sound::get().stopLoop("ambient.underwater.underwater_ambience"); }
+    if(inWorld_&&world_.dimension()==1){   // nether: low drone + random moods / additions
+     Sound::get().loop("ambient.nether.nether_wastes.ambience",0.3f); static unsigned r=12345u; auto rnd=[&](){ r=r*1664525u+1013904223u; return float((r>>8)&0xFFFF)/65535.f; };
+     if((ambMood_-=dt)<=0){ Sound::get().play("ambient.nether.nether_wastes.mood",0.7f,1.f); ambMood_=20.0+30.0*rnd(); }
+     if((ambAdd_-=dt)<=0){ Sound::get().play("ambient.nether.nether_wastes.addition",0.6f,0.9f+0.2f*rnd()); ambAdd_=8.0+17.0*rnd(); } }
+    else Sound::get().stopLoop("ambient.nether.nether_wastes.ambience");
+    { const Registry&Rp=Registry::get(); const uint16_t pb=world_.get((int)std::floor(pos_.x),(int)std::floor(pos_.y+0.5f),(int)std::floor(pos_.z)); if(inWorld_&&Rp.isNetherPortal(pb))Sound::get().loop("portal.portal",0.5f); else Sound::get().stopLoop("portal.portal"); }
 }

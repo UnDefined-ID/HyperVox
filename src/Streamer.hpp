@@ -17,6 +17,7 @@ struct ChunkSink{
  virtual bool upload(int cx,int cz,const ChunkMesh&m)=0;   // false = out of GPU memory
  virtual void release(int cx,int cz)=0;
  virtual void clear()=0;
+ virtual bool uploadBusy()const{return false;}                    // the last upload failed only because the staging buffer is busy this frame: try again next frame (NOT out of memory)
  virtual float fillRatio()const{return 0.f;}               // 0..1: how full the GPU chunk memory is
 };
 

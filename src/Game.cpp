@@ -80,7 +80,7 @@ UiInput Game::gatherInput(int fbw,int fbh,double now){
  UiInput in; double cx=0,cy=0; glfwGetCursorPos(win_,&cx,&cy); int ww=1,wh=1; glfwGetWindowSize(win_,&ww,&wh); if(ww<=0)ww=1; if(wh<=0)wh=1;
  in.mx=float(cx*double(fbw)/double(ww)); in.my=float(cy*double(fbh)/double(wh));
  const bool d[3]={glfwGetMouseButton(win_,GLFW_MOUSE_BUTTON_LEFT)==GLFW_PRESS,glfwGetMouseButton(win_,GLFW_MOUSE_BUTTON_RIGHT)==GLFW_PRESS,glfwGetMouseButton(win_,GLFW_MOUSE_BUTTON_MIDDLE)==GLFW_PRESS};
- in.lclick=d[0]&&!mousePrev_[0]; in.rclick=d[1]&&!mousePrev_[1]; in.mclick=d[2]&&!mousePrev_[2]; in.ldown=d[0];
+ in.lclick=d[0]&&!mousePrev_[0]; in.rclick=d[1]&&!mousePrev_[1]; in.mclick=d[2]&&!mousePrev_[2]; in.ldown=d[0]; in.rdown=d[1];
  for(int i=0;i<3;i++)mousePrev_[i]=d[i];
  in.shift=keyDown(GLFW_KEY_LEFT_SHIFT)||keyDown(GLFW_KEY_RIGHT_SHIFT);
  in.wheel=scroll_; scroll_=0; in.typed.swap(typed_); typed_.clear();
@@ -182,6 +182,16 @@ bool Game::useItem(){
  const Registry&R=Registry::get(); InvSlot&h=cur_.inv.s[cur_.inv.selected]; const std::string n=R.itemName(h.id); const bool creative=cur_.mode==MODE_CREATIVE;
  const int as=R.armorSlot(h.id);
  if(as>=0){ std::swap(h,cur_.inv.armor[as]); markWorldDirty(); return true; }    // wear it (swaps with what is worn)
+ if(n=="flint_and_steel"||n=="ender_eye"){   // light a nether portal / put an eye into an end portal frame
+   const float cy=std::cos(yaw_),sy=std::sin(yaw_),cp=std::cos(pitch_),sp=std::sin(pitch_); const Vec3 eye=pos_+Vec3{0.f,eyeH_,0.f},dir{sy*cp,sp,-cy*cp}; const Hit f=raycast(eye,dir,5.f,false);
+   if(f.hit){ if(n=="ender_eye"){ if(tryEyeOnFrame(f.x,f.y,f.z)){ if(cur_.mode!=MODE_CREATIVE)cur_.inv.consumeHeld(); markWorldDirty(); return true; } }
+    else { const uint16_t tb=world_.get(f.x,f.y,f.z); if(tb&&R.blockName(R.baseOf(tb))=="obsidian"&&tryLightNetherPortal(f.x+f.nx,f.y+f.ny,f.z+f.nz)){ playSound("block.fire.ambient",0.8f,1.f); markWorldDirty(); return true; } } } }
+ { static const std::pair<const char*,const char*> seeds[]={{"wheat_seeds","wheat"},{"carrot","carrots"},{"potato","potatoes"},{"beetroot_seeds","beetroots"},{"cocoa_beans","cocoa"}};   // plant crops: farmland for the field crops
+   for(const auto&sd:seeds)if(n==sd.first){ const BlockId crop=R.blockIdOrZero(sd.second); if(!crop)break;
+    const float cy=std::cos(yaw_),sy=std::sin(yaw_),cp=std::cos(pitch_),sp=std::sin(pitch_); const Vec3 eye=pos_+Vec3{0.f,eyeH_,0.f},dir{sy*cp,sp,-cy*cp}; const Hit f=raycast(eye,dir,5.f,false);
+    if(!f.hit||f.ny!=1)break; const uint16_t under=world_.get(f.x,f.y,f.z); const std::string un=under?R.blockName(R.baseOf(under)):std::string(); const bool cocoa=std::string(sd.second)=="cocoa";
+    if(cocoa?(un.find("jungle_log")==std::string::npos):(un!="farmland"))break; if(world_.get(f.x,f.y+1,f.z))break;
+    int o3[3][2]; const int n3=world_.set(f.x,f.y+1,f.z,crop,o3); markDirtyAround(f.x,f.z,n3,o3); blockSound(crop,1); if(cur_.mode!=MODE_CREATIVE)cur_.inv.consumeHeld(); markWorldDirty(); return true; } }
  const bool empty=n=="bucket",water=n=="water_bucket",lava=n=="lava_bucket"; if(!empty&&!water&&!lava)return false;
  const float cy=std::cos(yaw_),sy=std::sin(yaw_),cp=std::cos(pitch_),sp=std::sin(pitch_); const Vec3 eye=pos_+Vec3{0.f,eyeH_,0.f},dir{sy*cp,sp,-cy*cp};
  const Hit f=raycast(eye,dir,creative?6.f:5.f,true); if(!f.hit)return true;
@@ -228,11 +238,14 @@ void Game::breakBlock(bool drop){
  const uint16_t id=world_.get(hit_.x,hit_.y,hit_.z); if(!id)return;
  if(!Registry::get().info(id).breakable&&!creative)return;
  int out[3][2]; dropContainer(hit_.x,hit_.y,hit_.z); blockSound(world_.get(hit_.x,hit_.y,hit_.z),0); const int n=world_.set(hit_.x,hit_.y,hit_.z,0,out); markDirtyAround(hit_.x,hit_.z,n,out);
+ { const Registry&R2=Registry::get(); const int bp=R2.bedPart(id); if(bp>=0){ static const int bx[4]={0,1,0,-1},bz[4]={-1,0,1,0}; const int bf=R2.bedFacing(id),sg=bp==0?1:-1,ox=hit_.x+sg*bx[bf],oz=hit_.z+sg*bz[bf]; const uint16_t o=world_.get(ox,hit_.y,oz); if(o&&R2.baseOf(o)==R2.baseOf(id)&&R2.bedPart(o)==1-bp){ const int n4=world_.set(ox,hit_.y,oz,0,out); markDirtyAround(ox,oz,n4,out); } } }
  { const Registry&R1=Registry::get(); const int oy=R1.doorTopFor(id)?hit_.y+1:(R1.doorBottomOf(id)?hit_.y-1:-1); if(oy>=0){ const uint16_t o=world_.get(hit_.x,oy,hit_.z); if(o&&R1.baseOf(o)!=R1.baseOf(id)&&(R1.doorBottomOf(o)||R1.doorTopFor(o))){ const int n3=world_.set(hit_.x,oy,hit_.z,0,out); markDirtyAround(hit_.x,hit_.z,n3,out); } } }
- if(!creative&&drop){ const ItemId d=Registry::get().dropFor(id); if(d)cur_.inv.add(d,1); } if(!creative)exh_+=0.005f;
+ if(!creative&&drop){ const ItemId d=Registry::get().dropFor(id); if(d)ents_.spawnItem(Vec3{hit_.x+0.5f,hit_.y+0.35f,hit_.z+0.5f},d,1,Vec3{float(std::rand()%100-50)/60.f,2.5f,float(std::rand()%100-50)/60.f},0.4f); }   // a dropped item entity (picked up by walking over it) if(!creative)exh_+=0.005f;
  markWorldDirty();
 }
 void Game::placeBlock(){
+ struct HandGuard{ Inventory&inv; bool sw; ~HandGuard(){ if(sw)std::swap(inv.s[inv.selected],inv.off); } } hg{cur_.inv,cur_.inv.s[cur_.inv.selected].empty()&&!cur_.inv.off.empty()};   // nothing in the main hand: the offhand item is used instead
+ if(hg.sw)std::swap(cur_.inv.s[cur_.inv.selected],cur_.inv.off);
  if(cur_.mode==MODE_SPECTATOR)return;
  if(hit_.hit&&!glfwGetKey(win_,settings_.keys[ACT_DOWN])){ const Registry&R0=Registry::get(); const uint16_t tg=world_.get(hit_.x,hit_.y,hit_.z); if(const int ok=R0.openKind(tg)){   // doors, trapdoors, fence gates: right click opens / closes
    int out0[3][2]; const BlockId nb=R0.toggled(tg); int n=world_.set(hit_.x,hit_.y,hit_.z,nb,out0); markDirtyAround(hit_.x,hit_.z,n,out0);
@@ -256,6 +269,8 @@ void Game::placeBlock(){
  }
  BlockId id=R.placed((BlockId)h.id,hit_.nx,hit_.ny,hit_.nz,yaw_,pitch_,hit_.hy);   // logs follow the clicked face, furnaces face you, slabs use the half you clicked ...
 
+ if(R.isLadder(id)){   // a ladder needs a solid block behind it
+  const int f=R.variantIndex(id)&3; static const int lx[4]={0,1,0,-1},lz[4]={-1,0,1,0}; const uint16_t sup=world_.get(px-lx[f],py,pz-lz[f]); if(!sup||!R.info(sup).solid||R.info(sup).transparent||R.info(sup).shape!=0)return; }
  if(R.doorTopFor(id)){   // door hinge (vanilla rules): next to a door the two point at each other, next to a wall it hangs on the wall side, else on the side you clicked
   const int f=R.variantIndex(id)&3; static const int dxs[4]={0,1,0,-1},dzs[4]={-1,0,1,0}; const int fx=dxs[f],fz=dzs[f],lx=fz,lz=-fx,rx=-fz,rz=fx;
   auto full=[&](int ax,int ay,int az){ const uint16_t n=world_.get(ax,ay,az); if(!n)return false; const BlockInfo&ni=R.info(n); return ni.solid&&!ni.fluid&&!ni.transparent&&ni.shape==0&&ni.height16>=16; };
@@ -268,7 +283,11 @@ void Game::placeBlock(){
  if(const BlockId topH=R.doorTopFor(id)){   // doors are two blocks tall: needs room above and a block underneath
   if(py+1>=Chunk::HEIGHT)return; const uint16_t above=world_.get(px,py+1,pz); if(above&&!R.info(above).fluid&&R.info(above).shape!=Registry::SH_PLANT)return; const uint16_t below=world_.get(px,py-1,pz); if(!below||R.info(below).fluid)return;
   const int n2=world_.set(px,py+1,pz,topH,out); markDirtyAround(px,pz,n2,out); }
- const int n=world_.set(px,py,pz,id,out); markDirtyAround(px,pz,n,out); blockSound(id,1);       // (re-mesh the changed chunks)
+ if(R.bedPart(id)==0){   // a bed is two blocks: the head goes in front of the foot
+  static const int bx[4]={0,1,0,-1},bz[4]={-1,0,1,0}; const int bf=R.bedFacing(id),hx=px+bx[bf],hz=pz+bz[bf]; const uint16_t hb=world_.get(hx,py,hz),b1=world_.get(px,py-1,pz),b2=world_.get(hx,py-1,hz);
+  if((hb&&!R.info(hb).fluid&&R.info(hb).shape!=Registry::SH_PLANT)||!b1||!b2||R.info(b1).fluid||R.info(b2).fluid)return;
+  int o2[3][2]; const int n2=world_.set(hx,py,hz,R.bedHeadFor(id),o2); markDirtyAround(hx,hz,n2,o2); }
+ const int n=world_.set(px,py,pz,id,out); markDirtyAround(px,pz,n,out); blockSound(id,1); { const std::string pbn=R.blockName(R.baseOf(id)); if(pbn.find("chest")!=std::string::npos||pbn=="barrel"||pbn.find("shulker_box")!=std::string::npos)markPlayerChest(px,py,pz); }       // (re-mesh the changed chunks)
  if(cur_.mode!=MODE_CREATIVE)cur_.inv.consumeHeld();
  markWorldDirty();
 }
@@ -290,10 +309,14 @@ Mat4 Game::viewMatrix()const{
 
 void Game::updatePlay(float dt,const UiInput&in){
  const double now=in.time; const bool creative=cur_.mode==MODE_CREATIVE,spectator=cur_.mode==MODE_SPECTATOR;
- if(tickRate_>0&&doDaylight_){ timeAcc_+=double(dt)*tickRate_; while(timeAcc_>=1.0){worldTime_++;timeAcc_-=1.0;} }
+ { tickAcc_+=double(dt)*double(tickRate_)/20.0; int ran=0; while((tickAcc_>=1.0||stepTicks_>0)&&ran<50){ if(tickAcc_>=1.0)tickAcc_-=1.0; else stepTicks_--; onTick(); ran++; } if(ran>=50){tickAcc_=0;stepTicks_=0;} }   // fixed 20 ticks per second at /tick rate 20 (0 = frozen, /tick step runs single ticks)
+ if(locateFut_.valid()&&locateFut_.wait_for(std::chrono::seconds(0))==std::future_status::ready)chat_.sys(locateFut_.get(),time_);
+ updatePortals(dt);
+ entitiesUpdate(dt,now);
  if(keyPressed(settings_.keys[ACT_INVENTORY])&&!invJustClosed_&&cur_.mode!=MODE_SPECTATOR){openInventory();return;}
+ if(!chat_.isOpen()&&keyPressed(GLFW_KEY_X)&&cur_.mode!=MODE_SPECTATOR){ std::swap(cur_.inv.s[cur_.inv.selected],cur_.inv.off); playSound("random.click",0.5f,1.2f); markWorldDirty(); }   // swap hands
  for(int i=0;i<9;i++)if(keyPressed(GLFW_KEY_1+i))cur_.inv.selected=i;
- if(in.wheel!=0.f){ const int step=in.wheel>0?-1:1; cur_.inv.selected=((cur_.inv.selected+step)%9+9)%9; }
+ if(in.wheel!=0.f){ if(spectator){ specSpeed_=std::clamp(specSpeed_*(in.wheel>0?1.25f:0.8f),0.1f,20.f); noticeMsg_=std::string("Spectator speed: ")+std::to_string(int(specSpeed_*100.f+0.5f))+"%"; noticeUntil_=time_+1.5; } else { const int step=in.wheel>0?-1:1; cur_.inv.selected=((cur_.inv.selected+step)%9+9)%9; } }   // spectator: the wheel changes the flying speed (like vanilla)
  if(cur_.inv.selected!=lastSelected_){ lastSelected_=cur_.inv.selected; itemNameUntil_=now+2.0; }
  if(spectator)flying_=true; else if(!creative)flying_=false;
  else{
@@ -309,7 +332,7 @@ void Game::updatePlay(float dt,const UiInput&in){
  if(!waterId_){waterId_=(uint16_t)R.blockByName("water");lavaId_=(uint16_t)R.blockByName("lava");}
  const bool sneak=kd(ACT_DOWN)&&!flying_; sneakEdge_=sneak&&onGround_; eyeH_+=((sneak?1.27f:1.62f)-eyeH_)*std::min(1.f,dt*14.f); inFluidNow_=false;
  if(flying_){
-  const float sp=sprint?12.f:4.3f,spv=sprint?12.f:6.f;   // flying is walking speed until you sprint
+  const float sm=spectator?specSpeed_:1.f; const float sp=(sprint?12.f:4.3f)*sm,spv=(sprint?12.f:6.f)*sm;   // flying is walking speed until you sprint
   vel_.x=wish.x*sp;vel_.z=wish.z*sp; vel_.y=((kd(ACT_JUMP)?1.f:0.f)-(kd(ACT_DOWN)?1.f:0.f))*spv;
  }else{
   // water check: eye level AND feet separately (head-in vs feet-in)
@@ -336,9 +359,15 @@ void Game::updatePlay(float dt,const UiInput&in){
     if(collides(ahead)&&!collides(Vec3{ahead.x,ahead.y+1.05f,ahead.z}))vel_.y=std::max(vel_.y,9.f);
    }
   } else{
+   const uint16_t atMid=world_.get((int)std::floor(pos_.x),(int)std::floor(pos_.y+0.9f),(int)std::floor(pos_.z));
+   if((atFeet&&R.isLadder(atFeet))||(atMid&&R.isLadder(atMid))){   // ladder: climb with jump or by pushing against the wall, hold sneak to stay, otherwise slide down slowly
+    const bool wallPush=(wish.x*wish.x+wish.z*wish.z>0.01f)&&collides(Vec3{pos_.x+wish.x*0.3f,pos_.y,pos_.z+wish.z*0.3f});
+    vel_.y=sneak?0.f:((kd(ACT_JUMP)||wallPush)?4.f:std::max(vel_.y,-3.f)); fallPeak_=pos_.y; onGround_=false;
+    vel_.x=std::clamp(vel_.x,-3.f,3.f); vel_.z=std::clamp(vel_.z,-3.f,3.f);
+   } else {
    if(onGround_&&vel_.y<0.f)vel_.y=0.f;
    vel_.y-=32.f*dt; vel_.y=std::max(vel_.y,-70.f);
-   if(onGround_&&kd(ACT_JUMP))vel_.y=9.f;
+   if(onGround_&&kd(ACT_JUMP))vel_.y=9.f; }
   }
  }
  if(spectator){pos_.x+=vel_.x*dt;pos_.y+=vel_.y*dt;pos_.z+=vel_.z*dt;onGround_=false;} else movePlayer(dt);   // spectators fly through blocks
@@ -352,6 +381,7 @@ void Game::updatePlay(float dt,const UiInput&in){
  const Vec3 eye=pos_+Vec3{0.f,eyeH_,0.f},dir{sy*cp,sp2,-cy*cp};
  hit_=raycast(eye,dir,creative?6.f:5.f); if(spectator)hit_=Hit{};
  const bool ldown=mousePrev_[0],rdown=mousePrev_[1];
+ if(inWorld_&&!spectator&&!dead_)entityPre(eye,dir,creative,in,dt);   // attacking mobs / pointing at vehicles (may hide the block target)
  if(!ldown&&!rdown)clickGuard_=false; const bool armed=!clickGuard_;      // ignore the click that closed a menu / pressed 'Back to Game'
  if(armed){
   if(creative){ if(ldown){ breakCd_-=dt; if(in.lclick||breakCd_<=0.f){breakBlock();breakCd_=0.16f;} } else breakCd_=0.f; }
@@ -370,7 +400,7 @@ void Game::updatePlay(float dt,const UiInput&in){
    }
    if(eating&&std::fmod(eatProg_,0.25f)<dt)playSound("random.eat",0.6f,0.9f+0.2f*std::fmod(eatProg_*7.f,1.f));
    if(!eating)eatProg_=0.f; }
-  if(rdown){ placeCd_-=dt; if(in.rclick||placeCd_<=0.f){placeBlock();placeCd_=0.2f;} } else placeCd_=0.f;
+  if(rdown){ placeCd_-=dt; if(in.rclick||placeCd_<=0.f){ if(!entityRightClick(eye,dir,in.rclick))placeBlock(); placeCd_=0.2f;} } else placeCd_=0.f;
   if(in.mclick)pickBlock();
  }
 }
@@ -383,10 +413,10 @@ void Game::startLoading(LoadTask t,const WorldInfo*w){
 }
 void Game::enterWorld(const WorldInfo&w){
  health_=w.health>0.f?w.health:20.f; food_=std::clamp(w.food,0,20); sat_=w.sat; exh_=w.exh; healAcc_=starveAcc_=eatProg_=0.f; dead_=false; fallPeak_=0.f; wasGround_=true; timeAcc_=0;
- world_.setDebug(w.debug); world_.setSteel(true); if(!steel::available()){noticeMsg_=std::string("Flat world: ")+steel::status();noticeUntil_=time_+6;} containers_.clear(); loadContainers(w.folder); cur_.folder=w.folder; loadRecipeBook(w.folder);
- waitSave(); streamer_->reset(); world_.reset(w.seed);
+ world_.setDebug(w.debug&&w.dim==0); world_.setDimension(w.dim); world_.setSteel(true); if(!steel::available()){noticeMsg_=std::string("Flat world: ")+steel::status();noticeUntil_=time_+6;} containers_.clear(); loadContainers(w.folder,w.dim); cur_.folder=w.folder; loadRecipeBook(w.folder);
+ waitSave(); streamer_->reset(); world_.reset(w.seed); entitiesReset(w.folder,w.dim);
  if(tmpFut_.valid())tmpFut_.get(); { std::error_code ec; tmpDir_=Settings::dataDir()/"cache"/"chunks"; std::filesystem::remove_all(tmpDir_,ec); std::filesystem::create_directories(tmpDir_/"region",ec); }
- store_=std::make_shared<ChunkStore>(saves_.regionDir(w.folder)); tmpStore_=std::make_shared<ChunkStore>(tmpDir_/"region");   // tmpStore_ = throw-away chunk cache on disk, never part of the world
+ store_=std::make_shared<ChunkStore>(saves_.regionDirDim(w.folder,w.dim)); tmpStore_=std::make_shared<ChunkStore>(tmpDir_/"region");   // tmpStore_ = throw-away chunk cache on disk, never part of the world
  world_.setLoader([st=store_,tm=tmpStore_](int x,int z,Chunk&c){return st->load(x,z,c)||tm->load(x,z,c);});   // chunks are read from the save one at a time
  cur_=w; const bool creative=w.mode==MODE_CREATIVE;
  if(w.hasPlayer){pos_=Vec3{w.px,w.py,w.pz};yaw_=w.yaw;pitch_=w.pitch;flying_=(w.flying&&creative)||w.mode==MODE_SPECTATOR;}
@@ -400,8 +430,11 @@ void Game::saveWorld(bool sync){
  cur_.health=health_;cur_.food=food_;cur_.sat=sat_;cur_.exh=exh_; cur_.px=pos_.x;cur_.py=pos_.y;cur_.pz=pos_.z;cur_.yaw=yaw_;cur_.pitch=pitch_;cur_.flying=flying_;cur_.hasPlayer=true;
  cur_.lastPlayed=(int64_t)std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
  if(saveFut_.valid()){ if(!sync&&saveFut_.wait_for(std::chrono::seconds(0))!=std::future_status::ready)return; waitSave(); }   // never two saves at once
- const auto cmap=containers_; const std::filesystem::path cfile=saves_.regionDir(cur_.folder).parent_path()/"hypervox_containers.txt"; auto dirty=world_.dirtyChunks(); WorldInfo info=cur_; auto store=store_; World*w=&world_; const SaveManager*sm=&saves_;
- auto job=[this,cmap,cfile,dirty,info,store,w,sm]{ PerfScope ps("save (level.dat + chunks)",1500); sm->saveLevel(info); saveContainers(cmap,cfile); if(store&&!dirty.empty()&&store->save(dirty))w->markSaved(dirty); };
+
+ const std::vector<std::string> elines=entityLines(); const std::filesystem::path efile2=saves_.regionDir(cur_.folder).parent_path()/(cur_.dim==1?"hypervox_entities_nether.txt":cur_.dim==2?"hypervox_entities_end.txt":"hypervox_entities.txt");
+ pollLootChests();   // remember terrain chests generated since the last poll before the containers are written
+ const auto cmap=containers_; std::unordered_map<uint64_t,Container> emap; emap[kEnderKey]=ender_; const std::filesystem::path efile=saves_.regionDir(cur_.folder).parent_path()/"hypervox_enderchest.txt"; const std::filesystem::path cfile=saves_.regionDir(cur_.folder).parent_path()/(cur_.dim==1?"hypervox_containers_nether.txt":cur_.dim==2?"hypervox_containers_end.txt":"hypervox_containers.txt"); auto dirty=world_.dirtyChunks(); WorldInfo info=cur_; auto store=store_; World*w=&world_; const SaveManager*sm=&saves_;
+ auto job=[this,cmap,emap,efile,cfile,elines,efile2,dirty,info,store,w,sm]{ PerfScope ps("save (level.dat + chunks)",1500); sm->saveLevel(info); { std::ofstream ef(efile2,std::ios::trunc); for(const auto&l:elines)ef<<l<<"\n"; } saveContainers(cmap,cfile); saveContainers(emap,efile);   /* ender chest: one inventory per player (world folder), not per chest */ if(store&&!dirty.empty()&&store->save(dirty))w->markSaved(dirty); };
  if(sync)job(); else saveFut_=std::async(std::launch::async,job);
  lastSave_=glfwGetTime(); worldDirty_=false;
 }
@@ -497,7 +530,7 @@ void Game::buildPanorama(float W,float H,double t){
 // ------------------------------------------------------------------------------------------------ frame
 void Game::frame(){
  const double now=glfwGetTime(); const float dtRaw=float(now-lastTime_); lastTime_=now; time_=now; const float dt=std::min(0.05f,dtRaw);
- fpsAcc_+=dtRaw; fpsFrames_++; if(fpsAcc_>=0.5){fpsShown_=int(double(fpsFrames_)/fpsAcc_+0.5);fpsAcc_=0;fpsFrames_=0;}
+ frameMsAvg_+=(dtRaw*1000.f-frameMsAvg_)*0.06f; fpsAcc_+=dtRaw; fpsFrames_++; if(fpsAcc_>=0.5){fpsShown_=int(double(fpsFrames_)/fpsAcc_+0.5);fpsAcc_=0;fpsFrames_=0;}
  int fbw=0,fbh=0; glfwGetFramebufferSize(win_,&fbw,&fbh);
  if(fbw<=0||fbh<=0){glfwWaitEventsTimeout(0.1);return;}                 // minimised
  if(dtRaw>0.15f)std::fprintf(stderr,"[hypervox][SPIKE] previous frame took %.0f ms (see [SLOW] lines above for the cause)\n",dtRaw*1000.f);
@@ -523,8 +556,8 @@ void Game::frame(){
   size_t tokStart=0; const auto sug=chatSuggest(tokStart); const int ns=(int)sug.size();
   if(chat_.input()!=before)sugSel_=0;
   if(ns>0){
-   if(keyPressed(GLFW_KEY_UP))sugSel_=(sugSel_+ns-1)%ns;
-   if(keyPressed(GLFW_KEY_DOWN))sugSel_=(sugSel_+1)%ns;
+   if(keyPressed(GLFW_KEY_UP))sugSel_=(sugSel_+1)%ns;            // the list is drawn upwards from the input box: Up moves the highlight up
+   if(keyPressed(GLFW_KEY_DOWN))sugSel_=(sugSel_+ns-1)%ns;
    if(keyPressed(GLFW_KEY_TAB)){ const std::string pick=sug[std::clamp(sugSel_,0,ns-1)]; chat_.input()=chat_.input().substr(0,tokStart)+pick+(tokStart<=1?" ":""); sugSel_=0; }
   } else {
    if(keyPressed(GLFW_KEY_UP))chat_.histUp();
@@ -538,13 +571,13 @@ void Game::frame(){
  const int pcx=floorDiv16(pos_.x),pcz=floorDiv16(pos_.z);
  tickSounds(dt);
  if(inWorld_)updateRecipeUnlocks();
- if(soundsLoaded_)Sound::get().musicTick(inWorld_?"music.game":"music.menu",inWorld_&&cur_.mode==MODE_CREATIVE,dtRaw);
- if(inWorld_)tickFurnaces(dtRaw);
+ if(soundsLoaded_){ const int md=world_.dimension(); Sound::get().musicTick(!inWorld_?"music.menu":md==1?"music.game.nether":md==2?"music.game.end":"music.game",inWorld_&&md==0&&cur_.mode==MODE_CREATIVE,dtRaw);
+  const std::string np=Sound::get().takeNowPlaying(); if(!np.empty()){ const ItemId disc=Registry::get().itemByName("music_disc_cat"); pushToast("Now Playing",np,disc,2); } }
  if(inWorld_&&streamer_){
   // only chunks inside (a margin around) the camera's horizontal view cone stay on the GPU
   const float aspect=float(fbw)/float(fbh), halfH=std::atan(std::tan(float(settings_.fov)*kPi/360.f)*aspect);
   ViewCone vc=ViewCone::make(pos_.x,pos_.z,yaw_,halfH,0.35f,0.8f); vc.nearChunks=4; if(std::fabs(pitch_)>1.0f)vc.halfL=vc.halfU=4.f;   // looking steeply up/down: keep everything
-  { PerfScope ps("chunk streamer update+pump",25); const auto s0=std::chrono::steady_clock::now(); streamer_->update(pcx,pcz,settings_.renderDistance,vc); streamer_->pump(48); perfStream_+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-s0).count(); }
+  { PerfScope ps("chunk streamer update+pump",25); const auto s0=std::chrono::steady_clock::now(); streamer_->update(pcx,pcz,settings_.renderDistance,vc); streamer_->pump(48); entitiesRender(now); perfStream_+=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-s0).count(); }
   if(renderer_&&screen_!=Screen::Loading){ static std::vector<TileUpdate> ups; ups.clear(); pack_.collectAnimationUpdates(now*20.0,ups); if(!ups.empty())renderer_->updateTiles(ups); }   // water, lava, fire ... (20 ticks per second)
   if(((worldDirty_||world_.dirtyCount())&&now-lastSave_>60.0))saveWorld(false);
   if(world_.generatedCount()>=24)flushGenerated(false);   // autosave in the background: edits once a minute, new terrain every few seconds
@@ -558,8 +591,16 @@ void Game::frame(){
  buildScreen();
  manageMemory(now);
 
- FrameParams fp; fp.camera=eye; fp.chunkX=pcx; fp.chunkZ=pcz; fp.renderDist=settings_.renderDistance;
+ FrameParams fp; fp.camera=eye; fp.chunkX=pcx; fp.chunkZ=pcz; { const float tgt=(float)settings_.renderDistance; if(drawDist_<=0.f||drawDist_>tgt)drawDist_=tgt;
+  if(adaptiveDist_&&inWorld_){ if(frameMsAvg_>26.f)drawDist_=std::max(5.f,drawDist_-dtRaw*7.f); else if(frameMsAvg_<17.f)drawDist_=std::min(tgt,drawDist_+dtRaw*2.5f); } else drawDist_=tgt; }   // too slow: draw fewer chunks (they stay loaded, so nothing reloads)
+ fp.renderDist=std::max(4,(int)std::lround(drawDist_));
  fp.world=inWorld_&&screen_!=Screen::Loading;
+ if(inWorld_){   // real fog inside water / lava: you only see a few blocks
+  const uint16_t eb=world_.get((int)std::floor(eye.x),(int)std::floor(eye.y),(int)std::floor(eye.z));
+  if(eb){ const std::string en=Registry::get().blockName(Registry::get().baseOf(eb));
+   if(en=="water"){ fp.fogStart=0.5f; fp.fogEnd=22.f; fp.fogRGB[0]=0.10f; fp.fogRGB[1]=0.22f; fp.fogRGB[2]=0.55f; }
+   else if(en=="lava"){ fp.fogStart=0.f; fp.fogEnd=2.5f; fp.fogRGB[0]=0.6f; fp.fogRGB[1]=0.1f; fp.fogRGB[2]=0.f; } } }
+ if(inWorld_&&world_.dimension()==1&&fp.fogEnd<=0.f){ const float rd=float(settings_.renderDistance)*16.f; fp.fogStart=rd*0.2f; fp.fogEnd=rd*0.85f; fp.fogRGB[0]=0.20f; fp.fogRGB[1]=0.04f; fp.fogRGB[2]=0.04f; }   // the nether's thick red haze
  fp.vp=mul(projection(float(fbw)/float(fbh)),viewMatrix());
  if(screen_==Screen::Play&&hit_.hit){fp.outline=true;fp.ox=hit_.x;fp.oy=hit_.y;fp.oz=hit_.z; fp.outBoxes=blockBoxes(hit_.x,hit_.y,hit_.z,world_.get(hit_.x,hit_.y,hit_.z),fp.ob);}
 
@@ -568,6 +609,7 @@ void Game::frame(){
  invJustClosed_=false; snapshotKeys();
 }
 
+void Game::onTick(){ if((gameTicks_&63u)==0)pollLootChests(); gameTicks_++; if(doDaylight_)worldTime_++; if(inWorld_)tickFurnaces(0.05f); }
 void Game::shutdown(){
  steel::shutdown();
  settings_.save(); if(inWorld_)saveWorld(true); waitSave();
@@ -583,6 +625,7 @@ void Game::buildSky(float W,float H){
  auto mix=[](float x,float y,float t){return x+(y-x)*t;};
  float zen[3]={mix(8,103,day),mix(10,146,day),mix(28,236,day)},hor[3]={mix(18,188,day),mix(22,212,day),mix(48,252,day)};
  const float sunset[3]={255,150,80}; for(int i=0;i<3;i++)hor[i]=mix(hor[i],sunset[i],tw*0.8f);
+ const int dimn=world_.dimension(); if(dimn==1){ const float z1[3]={32,5,5},h1[3]={64,12,10}; for(int i=0;i<3;i++){zen[i]=z1[i];hor[i]=h1[i];} } else if(dimn==2){ const float z2[3]={6,3,14},h2[3]={26,12,40}; for(int i=0;i<3;i++){zen[i]=z2[i];hor[i]=h2[i];} }   // nether: dim red haze, end: dark purple
  auto col=[](const float*c,uint32_t al=255){return rgba((uint32_t)c[0],(uint32_t)c[1],(uint32_t)c[2],al);};
  const Sprite&wh=uiAtlas_.white(); const float wu=(wh.u0+wh.u1)*0.5f,wv=(wh.v0+wh.v1)*0.5f;
  auto quad=[&](float x0,float y0,uint32_t c0,float x1,float y1,uint32_t c1){ skyVerts_.push_back({x0,y0,wu,wv,c0});skyVerts_.push_back({x1,y0,wu,wv,c0});skyVerts_.push_back({x1,y1,wu,wv,c1});skyVerts_.push_back({x0,y1,wu,wv,c1}); };
@@ -593,7 +636,7 @@ void Game::buildSky(float W,float H){
  quad(0,-20,col(zen),W,yh,col(hor));                                  // zenith -> horizon
  if(yh<H+20)quad(0,yh,col(hor),W,H+20,col(hor));
  auto proj=[&](const Vec3&p,float&x,float&y){ const float z=dot(p,f); if(z<=0.05f)return false; x=W*0.5f+dot(p,r)/z*focal; y=H*0.5f-dot(p,u)/z*focal; return true; };
- if(day<0.9f){   // stars (they turn with the sky)
+ if(dimn==0&&day<0.9f){   // stars (they turn with the sky)
   static std::vector<Vec3> stars; if(stars.empty()){ uint32_t st=12345u; auto rnd=[&]{st=st*1664525u+1013904223u;return float(st>>8)/16777216.f;}; for(int i=0;i<260;i++){const float z=rnd()*2.f-1.f,t=rnd()*2.f*kPi,q=std::sqrt(1.f-z*z);stars.push_back(Vec3{q*std::cos(t),q*std::sin(t),z});} }
   const float ca=std::cos(a),sa=std::sin(a),al=(1.f-day)*255.f;
   for(size_t i=0;i<stars.size();i++){ const Vec3&q=stars[i]; const Vec3 p{q.x*ca-q.y*sa,q.x*sa+q.y*ca,q.z}; float x,y; if(!proj(p,x,y))continue;
@@ -606,8 +649,8 @@ void Game::buildSky(float W,float H){
   const float us[4]={u0,u1,u1,u0},vs[4]={v0,v0,v1,v1};
   for(int i=0;i<4;i++)skyVerts_.push_back({px[i],py[i],us[i],vs[i],0xFFFFFFFFu});
  };
- { const Sprite&sn=uiAtlas_.get("environment/celestial/sun"); body(sun,0.30f,sn,sn.u0,sn.v0,sn.u1,sn.v1); }
- { static const char*ph[8]={"full_moon","waning_gibbous","third_quarter","waning_crescent","new_moon","waxing_crescent","first_quarter","waxing_gibbous"};
+ if(dimn==0){ const Sprite&sn=uiAtlas_.get("environment/celestial/sun"); body(sun,0.30f,sn,sn.u0,sn.v0,sn.u1,sn.v1); }
+ if(dimn==0){ static const char*ph[8]={"full_moon","waning_gibbous","third_quarter","waning_crescent","new_moon","waxing_crescent","first_quarter","waxing_gibbous"};
    const Sprite&mn=uiAtlas_.get(std::string("environment/celestial/moon/")+ph[(worldTime_/24000)%8]); body(Vec3{-sun.x,-sun.y,0.f},0.20f,mn,mn.u0,mn.v0,mn.u1,mn.v1); }
 }
 

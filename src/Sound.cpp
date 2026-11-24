@@ -305,9 +305,36 @@ void Sound::shutdown() {
     m_impl.reset(); m_ok=false;
 #endif
 }
+std::string Sound::resolve(const std::string& ev) {
+#if OPENAL_AVAILABLE
+    if(!m_ok||!m_impl) return ev;
+    static std::mutex cm; static std::unordered_map<std::string,std::string> cache;
+    { std::lock_guard<std::mutex> lk(cm); auto it=cache.find(ev); if(it!=cache.end()) return it->second; }
+    const auto& E=m_impl->index.events; std::string best;
+    if(E.count(ev)) best=ev;
+    else {
+        std::vector<std::string> tok; { std::string t; for(char c:ev){ if(c=='.'||c=='/'){ if(!t.empty())tok.push_back(t); t.clear(); } else t+=char(std::tolower((unsigned char)c)); } if(!t.empty())tok.push_back(t); }
+        std::vector<std::string> mob; std::string act; for(size_t i=0;i<tok.size();i++){ if(tok[i]=="mob"||tok[i]=="entity"||tok[i]=="random") continue; if(i+1==tok.size()) act=tok[i]; else mob.push_back(tok[i]); }
+        if(mob.empty()&&!act.empty()){ mob.push_back(act); act.clear(); }
+        static const std::vector<std::pair<std::string,std::vector<std::string>>> syn={
+            {"hurt",{"hurt","hit"}},{"hit",{"hit","hurt"}},{"say",{"say","ambient","idle","moan"}},{"death",{"death","die"}},{"growl",{"growl","warn","say"}},{"scream",{"scream","stare","say"}},
+            {"portal",{"portal","teleport"}},{"fireball",{"fireball","shoot","shootcharge"}},{"big",{"big","jump","attack"}},{"small",{"small","squish","jump"}},{"bow",{"bow","shoot"}},{"explode",{"explode","explosion"}}};
+        std::vector<std::string> acts; if(!act.empty()){ acts.push_back(act); for(auto&p:syn) if(p.first==act) acts=p.second; }
+        auto matches=[&](const std::string& name,const std::string& a){ for(auto&m:mob) if(name.find(m)==std::string::npos) return false; return a.empty()||name.find(a)!=std::string::npos; };
+        auto search=[&](const std::string& a){ std::string r; for(auto& kv:E) if(matches(kv.first,a) && (r.empty()||kv.first.size()<r.size())) r=kv.first; return r; };
+        for(auto&a:acts){ best=search(a); if(!best.empty()) break; }
+        if(best.empty()&&!acts.empty()){ for(const char* a:{"say","ambient","idle"}){ best=search(a); if(!best.empty()) break; } }
+        if(best.empty()&&acts.empty()) best=search("");
+    }
+    { std::lock_guard<std::mutex> lk(cm); cache[ev]=best; }
+    return best;
+#else
+    return ev;
+#endif
+}
 void Sound::play(const std::string& ev, float vol, float pitch) {
 #if OPENAL_AVAILABLE
-    if(!m_ok||!m_impl) return; m_impl->play(m_impl->index,ev,vol,pitch,false,*this);
+    if(!m_ok||!m_impl) return; const std::string r=resolve(ev); if(r.empty()) return; m_impl->play(m_impl->index,r,vol,pitch,false,*this);
 #endif
 }
 void Sound::loop(const std::string& ev, float vol) {

@@ -57,6 +57,7 @@ public:
  // terracotta ... face 4 directions, pistons / dispensers / droppers / observers / barrels 6.
  BlockId baseOf(BlockId b)const{return b<m_base.size()?m_base[b]:b;}
  BlockId redstoneWire=0; uint16_t wireTile=0; const Model* wireModel(int mask)const{ return mask>=0&&mask<(int)m_wire.size()?&m_wire[(size_t)mask]:nullptr; }   // redstone dust: 16 connection patterns (n=1 e=2 s=4 w=8)
+ int modelBoxes(BlockId id,Box*out,int maxN)const;   // hitbox boxes taken from the detailed model (0 = use the simple shape)
  const Model* modelOf(BlockId id)const{ const uint16_t m=info(id).model; return (m&&m<=m_models.size())?&m_models[m-1]:nullptr; }
  const std::vector<Box>& boxes(uint16_t shape)const{ static const std::vector<Box> none; return (shape>=1&&shape<=m_shapes.size())?m_shapes[shape-1]:none; }   // safe for the neighbour-dependent shapes 250..252 (they have no fixed boxes)
  static constexpr uint16_t SH_FENCE=65530,SH_WALL=65531,SH_PANE=65532,SH_PLANT=65535;   // shapes that depend on their neighbours

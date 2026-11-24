@@ -58,6 +58,7 @@ public:
  size_t pendingCount();
  bool gpuFull()const{return m_gpuFull;}
 private:
+ std::vector<std::pair<int,int>> m_edits; std::unordered_set<uint64_t> m_editSet;   // main thread only: chunks to re-mesh right away
  struct Job{int cx,cz;uint32_t ver;};
  struct Result{int cx,cz;uint32_t ver;uint64_t epoch;ChunkMesh mesh;};
  static uint64_t key(int cx,int cz){return (static_cast<uint64_t>(static_cast<uint32_t>(cx))<<32)|static_cast<uint32_t>(cz);}

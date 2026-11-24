@@ -10,7 +10,7 @@
 #include <iostream>
 
 namespace {
-constexpr uint32_t kCacheVersion=13;
+constexpr uint32_t kCacheVersion=14;
 // Colormap tints (the pack ships grayscale grass / foliage / water that vanilla tints per biome).  alphaSet<0 = keep the texture alpha.
 struct Tint{const char*name;int r,g,b;int alphaSet,alphaCap;};
 const Tint kTints[]={
@@ -23,6 +23,7 @@ const Tint kTints[]={
  {"water_still",63,118,228,-1,255},{"water_flow",63,118,228,-1,255},
  {"melon_stem",110,190,25,-1,255},{"pumpkin_stem",110,190,25,-1,255},{"attached_melon_stem",150,190,40,-1,255},{"attached_pumpkin_stem",150,190,40,-1,255},   // stems are grey in the pack
  {"leaf_litter",125,100,45,-1,255},{"redstone_dust_dot",115,8,8,-1,255},{"redstone_dust_line0",115,8,8,-1,255},{"redstone_dust_line1",115,8,8,-1,255},          // translucent, see-through water like vanilla
+ {"lily_pad",32,128,48,-1,255},{"bush",145,189,89,-1,255},
  {"tinted_glass",160,160,160,-1,150},         // 160 = no colour change; always see-through
 };
 const Tint* findTint(const std::string&k){ for(auto&t:kTints)if(k==t.name)return &t; return nullptr; }

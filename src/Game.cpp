@@ -108,7 +108,7 @@ void Game::handleEscape(){
 bool Game::collides(const Vec3&p)const{
  const float hw=0.3f,hh=1.8f,e=1e-4f; const Registry&R=Registry::get();
  const int x0=(int)std::floor(p.x-hw+e),x1=(int)std::floor(p.x+hw-e),y0=(int)std::floor(p.y+e),y1=(int)std::floor(p.y+hh-e),z0=(int)std::floor(p.z-hw+e),z1=(int)std::floor(p.z+hw-e);
- for(int y=y0;y<=y1;y++)for(int z=z0;z<=z1;z++)for(int x=x0;x<=x1;x++){const uint16_t id=world_.get(x,y,z);if(!id)continue;const BlockInfo&bi=R.info(id);if(!bi.solid)continue; if(bi.shape&&bi.shape!=Registry::SH_PLANT){ float bxs[10][6]; const int nbx=blockBoxes(x,y,z,id,bxs,true); for(int k=0;k<nbx;k++){ const float bx0=float(x)+bxs[k][0],bx1=float(x)+bxs[k][3],by0=float(y)+bxs[k][1],by1=float(y)+bxs[k][4],bz0=float(z)+bxs[k][2],bz1=float(z)+bxs[k][5]; if(p.x+hw>bx0+e&&p.x-hw<bx1-e&&p.y+hh>by0+e&&p.y<by1-e&&p.z+hw>bz0+e&&p.z-hw<bz1-e)return true; } continue; } if(bi.height16>=16||p.y<float(y)+float(bi.height16)/16.f-e)return true;}
+ for(int y=y0;y<=y1;y++)for(int z=z0;z<=z1;z++)for(int x=x0;x<=x1;x++){const uint16_t id=world_.get(x,y,z);if(!id)continue;const BlockInfo&bi=R.info(id);if(!bi.solid)continue; if((bi.shape&&bi.shape!=Registry::SH_PLANT)||bi.model){ float bxs[10][6]; const int nbx=blockBoxes(x,y,z,id,bxs,true); for(int k=0;k<nbx;k++){ const float bx0=float(x)+bxs[k][0],bx1=float(x)+bxs[k][3],by0=float(y)+bxs[k][1],by1=float(y)+bxs[k][4],bz0=float(z)+bxs[k][2],bz1=float(z)+bxs[k][5]; if(p.x+hw>bx0+e&&p.x-hw<bx1-e&&p.y+hh>by0+e&&p.y<by1-e&&p.z+hw>bz0+e&&p.z-hw<bz1-e)return true; } continue; } if(bi.height16>=16||p.y<float(y)+float(bi.height16)/16.f-e)return true;}
  return false;
 }
 bool Game::moveAxis(int axis,float delta){
@@ -133,6 +133,9 @@ void Game::movePlayer(float dt){
 
 int Game::blockBoxes(int x,int y,int z,uint16_t id,float out[10][6],bool collision)const{
  const BlockInfo&bi=Registry::get().info(id); int n=0;
+ if(bi.model&&bi.solid&&bi.shape!=Registry::SH_PLANT&&!(bi.shape>=Registry::SH_FENCE&&bi.shape<=Registry::SH_PANE)){   // blocks with a detailed model (composter, cauldron, hopper, ...): the hitbox follows the model, so you can walk INTO a composter
+  Box mb[10]; const int k=Registry::get().modelBoxes(id,mb,10); for(int i=0;i<k;i++){ out[n][0]=mb[i].x0/16.f;out[n][1]=mb[i].y0/16.f;out[n][2]=mb[i].z0/16.f;out[n][3]=mb[i].x1/16.f;out[n][4]=mb[i].y1/16.f;out[n][5]=mb[i].z1/16.f; n++; }
+  if(n>0)return n; }
  if(bi.shape>=Registry::SH_FENCE&&bi.shape<=Registry::SH_PANE){   // fences / walls / panes follow their neighbours
   auto conn=[&](int dx,int dz){ const uint16_t nn=world_.get(x+dx,y,z+dz); if(!nn)return false; const BlockInfo&ni=Registry::get().info(nn); return (ni.conn&&ni.conn==bi.conn)||(ni.shape==0&&ni.solid&&!ni.transparent&&!ni.fluid&&ni.height16>=16); };
   Box dyn[9]; const int k=Registry::connectBoxes(bi.shape,conn(0,-1),conn(1,0),conn(0,1),conn(-1,0),dyn,collision?2:1);
@@ -287,6 +290,7 @@ void Game::placeBlock(){
   static const int bx[4]={0,1,0,-1},bz[4]={-1,0,1,0}; const int bf=R.bedFacing(id),hx=px+bx[bf],hz=pz+bz[bf]; const uint16_t hb=world_.get(hx,py,hz),b1=world_.get(px,py-1,pz),b2=world_.get(hx,py-1,hz);
   if((hb&&!R.info(hb).fluid&&R.info(hb).shape!=Registry::SH_PLANT)||!b1||!b2||R.info(b1).fluid||R.info(b2).fluid)return;
   int o2[3][2]; const int n2=world_.set(hx,py,hz,R.bedHeadFor(id),o2); markDirtyAround(hx,hz,n2,o2); }
+ if(!supportOk(px,py,pz,id))return;   // plants cannot stand on stone, torches need a wall ...
  const int n=world_.set(px,py,pz,id,out); markDirtyAround(px,pz,n,out); blockSound(id,1); { const std::string pbn=R.blockName(R.baseOf(id)); if(pbn.find("chest")!=std::string::npos||pbn=="barrel"||pbn.find("shulker_box")!=std::string::npos)markPlayerChest(px,py,pz); }       // (re-mesh the changed chunks)
  if(cur_.mode!=MODE_CREATIVE)cur_.inv.consumeHeld();
  markWorldDirty();
@@ -609,7 +613,7 @@ void Game::frame(){
  invJustClosed_=false; snapshotKeys();
 }
 
-void Game::onTick(){ if((gameTicks_&63u)==0)pollLootChests(); gameTicks_++; if(doDaylight_)worldTime_++; if(inWorld_)tickFurnaces(0.05f); }
+void Game::onTick(){ if((gameTicks_&63u)==0)pollLootChests(); gameTicks_++; tickCount_++; if(doDaylight_)worldTime_++; if(inWorld_){ tickFurnaces(0.05f); entitiesTick(); blocksTick(); } }
 void Game::shutdown(){
  steel::shutdown();
  settings_.save(); if(inWorld_)saveWorld(true); waitSave();

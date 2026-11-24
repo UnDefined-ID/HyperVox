@@ -46,6 +46,8 @@ size_t ChunkStreamer::pendingCount(){std::lock_guard<std::mutex> l(m_mu);return 
 
 void ChunkStreamer::markDirty(int cx,int cz){
  const uint64_t k=key(cx,cz); const uint32_t ver=++m_verCounter; m_version[k]=ver;
+ // a chunk that is already on screen is re-meshed on THIS thread in the next pump() (about 1 ms) instead of waiting in the worker queue behind terrain generation
+ if(m_meshed.count(k)){ if(m_editSet.insert(k).second)m_edits.push_back({cx,cz}); return; }
  std::lock_guard<std::mutex> l(m_mu);
  if(m_queued.count(k)){                     // already waiting: move it to the front (it snapshots when it starts)
   for(auto it=m_queue.begin();it!=m_queue.end();++it)if(it->cx==cx&&it->cz==cz){m_queue.erase(it);break;}
@@ -106,6 +108,12 @@ void ChunkStreamer::scan(){
 }
 
 void ChunkStreamer::pump(int maxUploads){
+ for(int n=0;!m_edits.empty()&&n<8;n++){   // block edits: immediate re-mesh + upload
+  const std::pair<int,int> c=m_edits.back(); m_edits.pop_back(); const uint64_t k=key(c.first,c.second); m_editSet.erase(k);
+  ChunkMesh mesh=World::buildMesh(m_world.snapshot(c.first,c.second),c.first,c.second);
+  if(m_sink.upload(c.first,c.second,mesh)){ m_meshed[k]=m_version[k]; }
+  else { std::lock_guard<std::mutex> l(m_mu); m_queue.push_front(Job{c.first,c.second,m_version[k]}); m_queued.insert(k); m_cv.notify_one(); }   // staging busy / buffer full: let a worker do it
+ }
  std::vector<Result> batch;
  { std::lock_guard<std::mutex> l(m_mu); if(m_results.empty())return; batch.swap(m_results); }
  int done=0; std::vector<Result> later;

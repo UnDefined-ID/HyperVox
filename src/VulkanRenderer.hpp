@@ -29,6 +29,8 @@ public:
  uint32_t vertexUsed()const override{return vtx.capacity-vtx.freeUnits();}
  bool resizeChunkMemory(int renderDist)override;
  bool growChunkMemory()override;
+ // one vkCmdDrawIndexedIndirect for all opaque chunk / entity draws instead of hundreds of vkCmdDrawIndexed calls (needs multiDrawIndirect + drawIndirectFirstInstance)
+ bool mdi=false; static constexpr uint32_t kMaxInd=32768; VkBuffer indBuf[2]={VK_NULL_HANDLE,VK_NULL_HANDLE}; VkDeviceMemory indMem[2]={VK_NULL_HANDLE,VK_NULL_HANDLE}; VkDrawIndexedIndirectCommand* indMap[2]={nullptr,nullptr};
  // chunk vertices live in real VRAM; uploads go through two host-visible staging buffers (one per frame in flight) and are copied by the GPU at the start of the frame
  static constexpr VkDeviceSize kStageBytes=16u*1024*1024;
  VkBuffer stageBuf[2]={VK_NULL_HANDLE,VK_NULL_HANDLE}; VkDeviceMemory stageMem[2]={VK_NULL_HANDLE,VK_NULL_HANDLE}; uint8_t* stageMap[2]={nullptr,nullptr}; VkDeviceSize stageHead[2]={0,0}; bool stageUsed[2]={false,false}; std::vector<VkBufferCopy> stageCopies[2];

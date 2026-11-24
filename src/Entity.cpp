@@ -22,8 +22,8 @@ Dims dimsOf(EType t){
   case EType::Slime: return {0.52f,0.52f,4}; case EType::Wolf: return {0.6f,0.85f,8}; case EType::Villager: return {0.6f,1.95f,20}; case EType::Arrow: return {0.2f,0.2f,1}; default: return {0.3f,0.3f,1}; }
 }
 bool isNamed(const World&w,int x,int y,int z,const char*name){ const uint16_t id=const_cast<World&>(w).get(x,y,z); return id&&Registry::get().blockName(Registry::get().baseOf(id))==name; }
-bool isWater(World&w,int x,int y,int z){ const uint16_t id=w.get(x,y,z); return id&&Registry::get().info(id).fluid&&Registry::get().blockName(id)=="water"; }
-bool isLava(World&w,int x,int y,int z){ const uint16_t id=w.get(x,y,z); return id&&Registry::get().info(id).fluid&&Registry::get().blockName(id)=="lava"; }
+bool isWater(World&w,int x,int y,int z){ const uint16_t id=w.get(x,y,z); return id&&Registry::get().info(id).fluid&&Registry::get().baseOf(id)==Registry::get().water; }
+bool isLava(World&w,int x,int y,int z){ const uint16_t id=w.get(x,y,z); return id&&Registry::get().info(id).fluid&&Registry::get().blockName(Registry::get().baseOf(id))=="lava"; }
 bool isRail(World&w,int x,int y,int z){ const uint16_t id=w.get(x,y,z); if(!id)return false; const std::string&n=Registry::get().blockName(Registry::get().baseOf(id)); return n.size()>=4&&n.compare(n.size()-4,4,"rail")==0; }
 uint16_t blockTop16(World&w,int x,int y,int z){      // height of the solid part of a block in 1/16 (0 = nothing to collide with)
  const uint16_t id=w.get(x,y,z); if(!id)return 0; const BlockInfo&bi=Registry::get().info(id); if(!bi.solid||bi.fluid)return 0; return bi.height16?bi.height16:16;
@@ -64,6 +64,34 @@ void walkToward(Entity&e,float dt,Vec3 dir,float want,float turn=8.f){
  if(e.wall&&e.onGround&&std::fabs(want)>0.001f)e.vel.y=7.2f; if(e.inWater)e.vel.y+=(e.vel.y<2.f?18.f:0.f)*dt;
 }
 void animWalk(Entity&e,float dt,float k=2.4f){ const float sp=std::sqrt(e.vel.x*e.vel.x+e.vel.z*e.vel.z); e.walkSpeed+=(std::min(1.f,sp*0.6f)-e.walkSpeed)*std::min(1.f,dt*10.f); e.walk+=sp*dt*k; }
+
+// ---- minecart on rails: straight, ascending and curved shapes (the rail variant number is the shape, see Registry kind 21)
+int railShapeOf(World&w,int x,int y,int z){ const Registry&R=Registry::get(); const uint16_t id=w.get(x,y,z); if(!id)return -1; const BlockId b=R.baseOf(id); const std::string&n=R.blockName(b); if(!(n.size()>=4&&n.compare(n.size()-4,4,"rail")==0))return -1; const int slot=R.variantIndex(id); return n=="rail"?slot:slot%6; }
+void stepMinecart(Entity&e,World&w,float dt,EntityEnv&env){
+ (void)env; int x=(int)std::floor(e.pos.x),z=(int)std::floor(e.pos.z),y=(int)std::floor(e.pos.y+0.15f); int shape=railShapeOf(w,x,y,z);
+ if(shape<0&&railShapeOf(w,x,y-1,z)>=0){ y--; shape=railShapeOf(w,x,y,z); } else if(shape<0&&railShapeOf(w,x,y+1,z)>=0){ y++; shape=railShapeOf(w,x,y,z); }
+ if(shape<0){ e.vel.y-=22.f*dt; e.vel.x*=std::max(0.f,1.f-dt*3.f); e.vel.z*=std::max(0.f,1.f-dt*3.f); moveBody(e,w,dt,0.f); return; }
+ const uint16_t id=w.get(x,y,z); const bool powered=Registry::get().blockName(Registry::get().baseOf(id))=="powered_rail"&&Registry::get().variantIndex(id)>=6;
+ float fx=e.pos.x-x,fz=e.pos.z-z; e.vel.y=0;
+ static const int DX[4]={0,1,0,-1},DZ[4]={-1,0,1,0};   // N E S W
+ if(shape>=6){   // curve: connections (S,E) (S,W) (N,W) (N,E)
+  static const int C[4][2]={{2,1},{2,3},{0,3},{0,1}}; const int* cc=C[shape-6];
+  const float sp=std::sqrt(e.vel.x*e.vel.x+e.vel.z*e.vel.z);
+  if(sp>0.05f){ const int enteredFrom=std::fabs(e.vel.x)>std::fabs(e.vel.z)?(e.vel.x>0?3:1):(e.vel.z>0?0:2); int out=-1; if(enteredFrom==cc[0])out=cc[1]; else if(enteredFrom==cc[1])out=cc[0];
+   if(out>=0&&std::fabs(fx-0.5f)<0.45f&&std::fabs(fz-0.5f)<0.45f){ e.vel.x=DX[out]*sp; e.vel.z=DZ[out]*sp; e.pos.x+=(x+0.5f-e.pos.x)*std::min(1.f,dt*6.f); e.pos.z+=(z+0.5f-e.pos.z)*std::min(1.f,dt*6.f); } }
+  e.t1=std::fabs(e.vel.x)>std::fabs(e.vel.z)?1.f:0.f; e.pos.y=y+0.1f;
+ } else {
+  const bool alongX=(shape==1||shape==2||shape==3); e.t1=alongX?1.f:0.f; if(alongX){ e.vel.z=0; e.pos.z+=(z+0.5f-e.pos.z)*std::min(1.f,dt*8.f); } else { e.vel.x=0; e.pos.x+=(x+0.5f-e.pos.x)*std::min(1.f,dt*8.f); }
+  float& v=alongX?e.vel.x:e.vel.z;
+  if(shape==2)v-=4.5f*dt; else if(shape==3)v+=4.5f*dt; else if(shape==4)v+=4.5f*dt; else if(shape==5)v-=4.5f*dt;   // downhill
+  if(powered&&std::fabs(v)>0.2f)v*=1.f+dt*0.9f; v*=std::max(0.f,1.f-dt*0.25f); if(std::fabs(v)>9.f)v=v>0?9.f:-9.f;
+  float rise=0; fx=e.pos.x-x; fz=e.pos.z-z; if(shape==2)rise=fx; else if(shape==3)rise=1.f-fx; else if(shape==4)rise=1.f-fz; else if(shape==5)rise=fz; e.pos.y=y+0.1f+std::clamp(rise,0.f,1.f);
+ }
+ // advance; stop (bounce) at the end of the track
+ const float nx=e.pos.x+e.vel.x*dt,nz=e.pos.z+e.vel.z*dt; const int cx=(int)std::floor(nx+(e.vel.x>0?0.45f:(e.vel.x<0?-0.45f:0.f))),cz=(int)std::floor(nz+(e.vel.z>0?0.45f:(e.vel.z<0?-0.45f:0.f)));
+ if(cx!=x||cz!=z){ const bool ok=railShapeOf(w,cx,y,cz)>=0||railShapeOf(w,cx,y+1,cz)>=0||railShapeOf(w,cx,y-1,cz)>=0; if(!ok){ e.vel.x*=-0.2f; e.vel.z*=-0.2f; return; } }
+ e.pos.x=nx; e.pos.z=nz; if(e.vel.x!=0||e.vel.z!=0)e.yaw=yawToward(e.vel.x,e.vel.z);
+}
 ItemId itemNamed(const char*n){ return Registry::get().itemByName(n); }
 bool isNight(double t){ const long long m=(long long)t%24000; return m>=13000; }
 }
@@ -329,17 +357,7 @@ void EntityMgr::update(float dt,EntityEnv&env){
     if(inW){ e.vel.y+=(above?9.f:22.f)*dt; e.vel.y*=std::max(0.f,1.f-dt*3.f); } else e.vel.y-=22.f*dt;
     const float fr=inW?std::max(0.f,1.f-dt*0.9f):std::max(0.f,1.f-dt*6.f); e.vel.x*=fr; e.vel.z*=fr; { const float sp=std::sqrt(e.vel.x*e.vel.x+e.vel.z*e.vel.z); if(sp>7.f){ e.vel.x*=7.f/sp; e.vel.z*=7.f/sp; } }
     moveBody(e,w,dt,0.f); if(e.rider&&env.playerRiding==false)e.rider=0; if(e.pos.y<2)e.dead=true; break; }
-   case EType::Minecart: {
-    const int x=(int)std::floor(e.pos.x),y=(int)std::floor(e.pos.y+0.1f),z=(int)std::floor(e.pos.z); const bool onRail=isRail(w,x,y,z);
-    if(onRail){ const bool rx=isRail(w,x+1,y,z)||isRail(w,x-1,y,z); const bool rz=isRail(w,x,y,z+1)||isRail(w,x,y,z-1); const bool alongX=rx&&!(rz&&!rx); e.t1=alongX?1.f:0.f;
-     const uint16_t id=w.get(x,y,z); const bool powered=Registry::get().blockName(Registry::get().baseOf(id))=="powered_rail";
-     if(alongX){ e.pos.z=z+0.5f; e.vel.z=0; e.pos.y=y+0.1f; e.vel.y=0; if(powered&&std::fabs(e.vel.x)>0.2f)e.vel.x*=1.0f+dt*0.8f; e.vel.x*=std::max(0.f,1.f-dt*0.25f);
-      const float nx=e.pos.x+e.vel.x*dt; if(e.vel.x!=0){ const int tx=(int)std::floor(nx+(e.vel.x>0?0.45f:-0.45f)); if(tx!=x&&!isRail(w,tx,y,z)){ e.vel.x*=-0.2f; } else e.pos.x=nx; } }
-     else { e.pos.x=x+0.5f; e.vel.x=0; e.pos.y=y+0.1f; e.vel.y=0; if(powered&&std::fabs(e.vel.z)>0.2f)e.vel.z*=1.0f+dt*0.8f; e.vel.z*=std::max(0.f,1.f-dt*0.25f);
-      const float nz=e.pos.z+e.vel.z*dt; if(e.vel.z!=0){ const int tz=(int)std::floor(nz+(e.vel.z>0?0.45f:-0.45f)); if(tz!=z&&!isRail(w,x,y,tz)){ e.vel.z*=-0.2f; } else e.pos.z=nz; } }
-     { const float sp=std::sqrt(e.vel.x*e.vel.x+e.vel.z*e.vel.z); if(sp>9.f){ e.vel.x*=9.f/sp; e.vel.z*=9.f/sp; } } }
-    else { e.vel.y-=22.f*dt; e.vel.x*=std::max(0.f,1.f-dt*3.f); e.vel.z*=std::max(0.f,1.f-dt*3.f); moveBody(e,w,dt,0.f); }
-    if(e.vel.x!=0||e.vel.z!=0)e.yaw=yawToward(e.vel.x,e.vel.z); if(e.rider&&env.playerRiding==false)e.rider=0; if(e.pos.y<2)e.dead=true; break; }
+   case EType::Minecart: { stepMinecart(e,w,dt,env); if(e.rider&&env.playerRiding==false)e.rider=0; if(e.pos.y<2)e.dead=true; break; }
    default: break; }
  }
  // ---------------- spawning (every couple of seconds) and clean-up

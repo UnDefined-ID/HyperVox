@@ -89,6 +89,7 @@ public:
  void markSaved(const DirtyList&saved);                       // forget the ones that were not modified again meanwhile
  size_t dirtyCount()const;
  DirtyList takeGenerated();
+ std::vector<std::array<int,3>> takeChanges();                  // every block set() since the last call (world coordinates): drives block updates and fluids
  std::vector<std::array<int,3>> takeNewLootChests();           // chests / barrels the generator placed in freshly generated chunks since the last call (world block coordinates)                                  // chunks the generator made since the last call (to be written to the save, so the terrain never changes)
  size_t generatedCount()const;
 private:
@@ -101,5 +102,5 @@ private:
  mutable std::shared_mutex m_mu;
  mutable std::unordered_map<uint64_t,std::shared_ptr<const Chunk>> m_chunks;
  std::unordered_map<uint64_t,std::shared_ptr<const Chunk>> m_dirty;
- mutable std::vector<std::pair<uint64_t,std::shared_ptr<const Chunk>>> m_generated; mutable std::vector<std::array<int,3>> m_newLoot; mutable std::mutex m_lootMu;
+ mutable std::vector<std::pair<uint64_t,std::shared_ptr<const Chunk>>> m_generated; mutable std::vector<std::array<int,3>> m_newLoot,m_changes; mutable std::mutex m_lootMu;
 };

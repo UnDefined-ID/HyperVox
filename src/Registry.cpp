@@ -53,13 +53,16 @@ void Registry::init(const TexturePack&pack){
     if(ends(nm,"_log")||ends(nm,"_wood")||ends(nm,"_stem")||ends(nm,"_hyphae")||nm=="hay_block"||nm=="bone_block"||nm=="basalt"||nm=="polished_basalt"||nm=="quartz_pillar"||nm=="purpur_pillar"||nm=="deepslate"||nm=="muddy_mangrove_roots"||ends(nm,"_froglight")||nm=="infested_deepslate"||nm=="ancient_debris"&&false)kind=1;
     else if(nm=="furnace"||nm=="blast_furnace"||nm=="smoker"||nm=="carved_pumpkin"||nm=="jack_o_lantern"||nm=="loom"||nm=="stonecutter"||nm=="beehive"||nm=="bee_nest"||ends(nm,"_glazed_terracotta")||nm=="chiseled_bookshelf"||nm=="lectern"||nm=="grindstone"||nm=="anvil"||nm=="bell")kind=2;
     else if(nm=="dispenser"||nm=="dropper"||nm=="observer"||nm=="piston"||nm=="sticky_piston"||nm=="barrel"||nm=="command_block"||nm=="chain_command_block"||nm=="repeating_command_block"||nm=="shulker_box"||ends(nm,"_shulker_box")||nm=="crafter")kind=3;
+    else if(nm=="water"||nm=="lava")kind=20;
+    // (fluid levels: flowing 1..7 with a lower surface, 8 = falling)
     if(!kind)continue;
     const BlockInfo b0=m_blocks[i]; const uint16_t T=b0.texture[1],Bt=b0.texture[0],S=b0.texture[2],F=b0.texture[5];
-    m_rotKind[i]=(uint8_t)kind; m_variants[i][0]=(BlockId)i;
+    m_rotKind[i]=(uint8_t)((kind==20||kind==21)?0:kind); m_variants[i][0]=(BlockId)i;
     auto add=[&](int slot,const char*suffix,const uint16_t tx[6],uint16_t rot){
      BlockInfo b=b0; for(int f=0;f<6;f++)b.texture[f]=tx[f]; b.rotq=rot; const BlockId id=(BlockId)m_blocks.size();
      m_blocks.push_back(b); m_blockNames.push_back(nm+suffix); m_blockItems.push_back(m_blockItems[i]); m_base.push_back((BlockId)i); m_rotKind.push_back(0); m_variants.push_back(std::array<BlockId,16>{}); m_material.push_back(0); m_mcNameOf.push_back(std::string()); m_variants[i][slot]=id; };
-    if(kind==1){ const uint16_t X[6]={S,S,T,T,S,S},Z[6]={S,S,S,S,T,T}; add(1,"@x",X,uint16_t(1<<0|1<<2|1<<8|1<<10)); add(2,"@z",Z,uint16_t(1<<4|1<<6)); }   // grain follows the axis
+    if(kind==20){ for(int lv=1;lv<=8;lv++){ std::string sfx="@f"+std::to_string(lv); add(lv,sfx.c_str(),b0.texture,0); const BlockId vid=m_variants[i][lv]; m_blocks[vid].height16=(uint8_t)(lv==8?16:16-lv*2); m_blocks[vid].shape=0; } }
+    else if(kind==1){ const uint16_t X[6]={S,S,T,T,S,S},Z[6]={S,S,S,S,T,T}; add(1,"@x",X,uint16_t(1<<0|1<<2|1<<8|1<<10)); add(2,"@z",Z,uint16_t(1<<4|1<<6)); }   // grain follows the axis
     else{   // facing: 0 south (front on +Z), 1 north, 2 east, 3 west, 4 up, 5 down
      const bool cap=(nm=="piston"||nm=="sticky_piston"||nm=="barrel");           // these have a head (their "top" texture) and a different back
      uint16_t Fr=F!=S?F:T,Bk=S,Sd=S,Tp=T,Bm=Bt;                                    // front, back, sides, top/bottom when facing sideways
@@ -325,6 +328,13 @@ void Registry::init(const TexturePack&pack){
     if(clear){ b.transparent=true; b.cullSame=true; } } }
  { std::vector<std::pair<std::string,BlockId>> wax; for(auto&kv:m_mcHead)if(kv.first.find("copper")!=std::string::npos&&kv.first.compare(0,6,"waxed_")!=0)wax.push_back({"waxed_"+kv.first,kv.second}); for(auto&kv:m_blockIds)if(kv.first.find("copper")!=std::string::npos&&kv.first.compare(0,6,"waxed_")!=0&&kv.first.find('@')==std::string::npos&&m_base[kv.second]==kv.second)wax.push_back({"waxed_"+kv.first,kv.second}); for(auto&e:wax)if(!m_mcHead.count(e.first))m_mcHead[e.first]=e.second;   // waxed copper loads as its unwaxed twin
    if(!m_mcHead.count("waxed_copper_block")){ auto it=m_blockIds.find("copper_block"); if(it!=m_blockIds.end())m_mcHead["waxed_copper_block"]=it->second; } }
+
+ // rail shapes (rails are created after the generic variant loop): 0 straight N-S, 1 E-W, 2..5 ascending E/W/N/S, 6..9 curves (plain rail only); powered kinds: +6 = powered
+ for(const char*rn:{"rail","powered_rail","detector_rail","activator_rail"}){ auto it=m_blockIds.find(rn); if(it==m_blockIds.end())continue; const size_t i=it->second; const std::string nm=rn; const BlockInfo b0=m_blocks[i]; const bool plain=(nm=="rail"); const int slots=plain?10:12;
+  const uint16_t corner=pack.has("rail_corner")?(uint16_t)pack.id("rail_corner"):b0.texture[1]; const std::string onName=nm+"_on"; const uint16_t on=pack.has(onName)?(uint16_t)pack.id(onName):b0.texture[1];
+  m_variants[i][0]=(BlockId)i;
+  for(int s=1;s<slots;s++){ BlockInfo b=b0; uint16_t t1=b0.texture[1]; if(plain&&s>=6)t1=corner; if(!plain&&s>=6)t1=on; for(int k=0;k<6;k++)b.texture[k]=t1; b.rotq=0; const BlockId id=(BlockId)m_blocks.size();
+   m_blocks.push_back(b); m_blockNames.push_back(nm+"@s"+std::to_string(s)); m_blockItems.push_back(m_blockItems[i]); m_base.push_back((BlockId)i); m_rotKind.push_back(0); m_variants.push_back(std::array<BlockId,16>{}); m_material.push_back(0); m_mcNameOf.push_back(std::string()); m_variants[i][s]=id; } }
  initModels(pack);   // detailed render models for the blocks the generated list could only make as boxes
  m_stairState.assign(m_blocks.size(),-1); for(size_t b=0;b<m_blocks.size();b++){ if(b<m_rotKind.size()&&m_rotKind[b]==5&&m_base[b]==b){ for(int i=0;i<8;i++)if(m_variants[b][i])m_stairState[m_variants[b][i]]=(int8_t)i; } }   // dynamic stair shapes
  // every other item texture in the pack becomes an item too (so nothing the pack ships is missing from the creative menu)

@@ -140,11 +140,11 @@ void Game::drawHud(){
  if(settings_.debugLevel>0&&screen_==Screen::Play){
   char b[160]; float y=3;
   auto line=[&](const char*s){ui_.text(s,3,y,COL_WHITE);y+=10;};
-  std::snprintf(b,sizeof b,"hypervox  %d fps",fpsShown_); line(b);
+  std::snprintf(b,sizeof b,"hypervox  %d fps",fpsShown_); ui_.text(b,3,y,fpsShown_>=55?rgba(120,255,120,255):(fpsShown_>=30?rgba(255,230,90,255):rgba(255,90,90,255))); y+=10;
   std::snprintf(b,sizeof b,"XYZ: %.1f / %.1f / %.1f",pos_.x,pos_.y,pos_.z); line(b);
-  if(renderer_){ std::snprintf(b,sizeof b,"VRAM: %.0f MB tracked (chunk mesh %.0f of %.0f MB, rest textures + frame buffers)  RAM: %d MB",double(renderer_->vramBytes())/1048576.0,double(renderer_->vertexUsed())*8.0/1048576.0,double(renderer_->vertexCapacity())*8.0/1048576.0,rssMB_); line(b); }
-  { std::snprintf(b,sizeof b,"TPS: %.1f/20  MSPT: %.2f ms  entities: %d   draw distance: %d/%d%s",tps_,msptEma_,(int)ents_.list.size(),(int)std::lround(drawDist_),settings_.renderDistance,adaptiveDist_?" (auto)":""); line(b); }
   if(settings_.debugLevel>=2){
+  { std::snprintf(b,sizeof b,"TPS: %.1f/20  MSPT: %.2f ms  entities: %d   draw distance: %d/%d%s",tps_,msptEma_,(int)ents_.list.size(),(int)std::lround(drawDist_),settings_.renderDistance,adaptiveDist_?" (auto)":""); ui_.text(b,3,y,tps_>=19.f?rgba(120,255,120,255):(tps_>=15.f?rgba(255,230,90,255):rgba(255,90,90,255))); y+=10; }
+  if(renderer_){ std::snprintf(b,sizeof b,"VRAM: %.0f MB tracked (chunk mesh %.0f of %.0f MB, rest textures + frame buffers)  RAM: %d MB",double(renderer_->vramBytes())/1048576.0,double(renderer_->vertexUsed())*8.0/1048576.0,double(renderer_->vertexCapacity())*8.0/1048576.0,rssMB_); line(b); }
    { const std::string tl=std::string("Terrain: ")+steel::status(); line(tl.c_str()); }
   std::snprintf(b,sizeof b,"Chunks: %u drawn, %zu loaded, render distance %d%s",renderer_?renderer_->drawnChunks():0,streamer_?streamer_->meshedCount():size_t(0),settings_.renderDistance,streamer_&&streamer_->gpuFull()?" (GPU memory full)":""); line(b);
   std::snprintf(b,sizeof b,"%s mode%s  seed %lld",modeName(cur_.mode),flying_?" (flying)":"",(long long)(int64_t)cur_.seed); line(b);

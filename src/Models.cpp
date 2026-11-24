@@ -145,8 +145,21 @@ void Registry::initModels(const TexturePack&pack){
    if(plant>=0){ m.quads.push_back(plane(0,0,8,16,8,8,plant,0,8,16,16)); m.quads.push_back(plane(8,0,0,8,8,16,plant,0,8,16,16)); }
    setM(id,m); }
 
- // ---- rails: ONE flat textured quad
- for(const char*nm:{"rail","powered_rail","detector_rail","activator_rail"}){ const BlockId id=idOf(nm); if(!id)continue; const int t=m_blocks[id].texture[1]; Model m; m.quads.push_back(flatUp(0,0,16,16,1,t,0,0,16,16)); setM(id,m); }
+ // ---- rails: ONE textured quad per shape (flat, ascending, curved); the texture comes from the variant's own tiles
+ for(const char*nm:{"rail","powered_rail","detector_rail","activator_rail"}){ const BlockId base=idOf(nm); if(!base)continue; const bool plain=std::string(nm)=="rail"; const int slots=plain?10:12;
+  for(int s=0;s<slots;s++){ const BlockId id=s==0?base:var(base,s); if(!id)continue; const int t=m_blocks[id].texture[1]; const int shape=plain?s:(s%6); Model m;
+   auto quad=[&](const float P[4][3],const float UV[4][2]){ MQuad q; q.tex=(int16_t)t; q.twoSided=false; for(int i=0;i<4;i++){ for(int k=0;k<3;k++)q.p[i][k]=P[i][k]; q.uv[i][0]=UV[i][0]; q.uv[i][1]=UV[i][1]; } m.quads.push_back(q); };
+   // corners in the order (x0,z0) (x0,z1) (x1,z1) (x1,z0); y per corner differs for slopes
+   float y00=1,y01=1,y11=1,y10=1; bool alongX=false; int rot=0;
+   switch(shape){ case 0: break; case 1: alongX=true; break;
+    case 2: alongX=true; y10=17; y11=17; break;      // rises towards +x
+    case 3: alongX=true; y00=17; y01=17; break;      // rises towards -x
+    case 4: y00=17; y10=17; break;                   // rises towards -z
+    case 5: y01=17; y11=17; break;                   // rises towards +z
+    case 6: break; case 7: rot=1; break; case 8: rot=2; break; default: rot=3; break; }
+   const float P[4][3]={{0,y00,0},{0,y01,16},{16,y11,16},{16,y10,0}}; float UV[4][2];
+   for(int i=0;i<4;i++){ const float x=P[i][0],z=P[i][2]; float u=x,v=z; if(alongX){ u=z; v=x; } else if(plain&&shape>=6){ if(rot==1){ u=z; v=16-x; } else if(rot==2){ u=16-x; v=16-z; } else if(rot==3){ u=16-z; v=x; } } UV[i][0]=u; UV[i][1]=v; }
+   quad(P,UV); setM(id,m); } }
 
  // ---- ladders: one double sided plane on the wall (variants: north east south west = the side the ladder faces)
  { const BlockId base=idOf("ladder"); const int t=base?m_blocks[base].texture[2]:-1; if(base&&t>=0){ Model m; MQuad q; q.tex=(int16_t)t; q.twoSided=true;
@@ -328,4 +341,15 @@ void Registry::initModels(const TexturePack&pack){
 
  // ---- tripwire hook: the hook plate on a wall plane
  { const BlockId id=idOf("tripwire_hook"); const int t=T("tripwire_hook"); if(id&&t>=0){ Model m; m.quads.push_back(plane(0,0,2.5f,16,16,2.5f,t,0,0,16,16)); setM(id,m); } }
+}
+
+int Registry::modelBoxes(BlockId id,Box*out,int maxN)const{
+ const Model*md=modelOf(id); if(!md)return 0; int n=0;
+ for(const MBox&b:md->boxes){
+  if(b.twoSided||(b.trans&&!b.cullBorder))continue;                 // string, portal surface, the inner cube of honey / slime
+  const float dx=b.x1-b.x0,dy=b.y1-b.y0,dz=b.z1-b.z0; if(dx<0.5f||dy<0.5f||dz<0.5f)continue;
+  if(dx*dz<16.f)continue;                                           // legs, rods, torches: too small to matter
+  if(n>=maxN)break; auto q=[](float v){ return (uint8_t)std::clamp((int)std::lround(v),0,255); };
+  out[n++]=Box{q(b.x0),q(b.y0),q(b.z0),q(b.x1),q(b.y1),q(b.z1)}; }
+ return n;
 }

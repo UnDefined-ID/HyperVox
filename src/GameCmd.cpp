@@ -129,16 +129,16 @@ void Game::registerCommands() {
             if(locateFut_.valid()){chat_.sys("Still searching ...",now);return true;}
             const Registry&R=Registry::get(); std::string nm=A[2]; if(nm.compare(0,10,"minecraft:")==0)nm=nm.substr(10); const BlockId want=R.baseOf(R.blockIdOrZero(nm));
             if(!want){chat_.sys("Unknown block: "+A[2],now);return true;}
-            int rad=24; if(A.size()>=4)parseInt(A[3],rad); rad=std::clamp(rad,1,96);
+            int rad=2048; if(A.size()>=4)parseInt(A[3],rad); rad=std::clamp(rad,1,4096);
             const int pcx=(int)std::floor(pos_.x)>>4,pcz=(int)std::floor(pos_.z)>>4; const float px=pos_.x,pz=pos_.z; World*w=&world_;
-            chat_.sys("Searching for "+nm+" within "+std::to_string(rad)+" chunks (terrain is generated as needed) ...",now);
+            chat_.sys("Searching for "+nm+" within "+std::to_string(rad)+" chunks (terrain is generated as needed, this can take a while) ...",now);
             locateFut_=std::async(std::launch::async,[w,want,rad,pcx,pcz,px,pz,nm]()->std::string{
-                const Registry&R=Registry::get();
-                for(int r=0;r<=rad;r++)for(int dz=-r;dz<=r;dz++)for(int dx=-r;dx<=r;dx++){ if(std::max(std::abs(dx),std::abs(dz))!=r)continue;
-                    const auto c=w->acquire(pcx+dx,pcz+dz,false); const int top=std::min(c->maxY,Chunk::HEIGHT-1); long best=-1; int bx=0,by=0,bz=0;
-                    for(int y=0;y<=top;y++)for(int z=0;z<16;z++)for(int x=0;x<16;x++){ const uint16_t id=c->at(x,y,z); if(id&&R.baseOf(id)==want){ const int wx=(pcx+dx)*16+x,wz=(pcz+dz)*16+z; const long d=long(wx-px)*long(wx-px)+long(wz-pz)*long(wz-pz); if(best<0||d<best){best=d;bx=wx;by=y-Chunk::Y_OFFSET;bz=wz;} } }
-                    if(best>=0)return "Nearest "+nm+" is at "+std::to_string(bx)+" "+std::to_string(by)+" "+std::to_string(bz)+" ("+std::to_string((int)std::sqrt((double)best))+" blocks away)";
+                const Registry&R=Registry::get(); long best=-1; int bx=0,by=0,bz=0; int stopRing=1<<30;
+                for(int r=0;r<=rad&&r<=stopRing;r++)for(int dz=-r;dz<=r;dz++)for(int dx=-r;dx<=r;dx++){ if(std::max(std::abs(dx),std::abs(dz))!=r)continue;
+                    const auto c=w->acquire(pcx+dx,pcz+dz,false); const int top=std::min(c->maxY,Chunk::HEIGHT-1);
+                    for(int y=0;y<=top;y++)for(int z=0;z<16;z++)for(int x=0;x<16;x++){ const uint16_t id=c->at(x,y,z); if(id&&R.baseOf(id)==want){ const int wx=(pcx+dx)*16+x,wz=(pcz+dz)*16+z; const long d=long(wx-px)*long(wx-px)+long(wz-pz)*long(wz-pz); if(best<0||d<best){best=d;bx=wx;by=y-Chunk::Y_OFFSET;bz=wz; stopRing=std::max(r+1,(int)std::ceil(std::sqrt((double)d)/16.0)+1);} } }   // keep searching until no closer chunk can exist
                 }
+                if(best>=0)return "Nearest "+nm+" is at "+std::to_string(bx)+" "+std::to_string(by)+" "+std::to_string(bz)+" ("+std::to_string((int)std::sqrt((double)best))+" blocks away)";
                 return "No "+nm+" found within "+std::to_string(rad)+" chunks"; });
             return true;
         }
@@ -196,7 +196,7 @@ void Game::initSounds() {
         if(std::filesystem::exists(p)) { Sound::get().init(p); soundsLoaded_=true; return; }
     }
     // Sounds zip not extracted yet: try to extract if the zip is present
-    std::cout<<"[Sound] Put hypervox_sounds.zip into the hypervox data folder and restart to enable audio\n";
+    std::cout<<"[Sound] Put minecraft-sounds.zip into the hypervox data folder and restart to enable audio\n";
 }
 // sound pack groups: dig.* (break/place) and step.* use cloth coral grass gravel sand snow stone wet_grass wood
 std::string Game::soundGroup(BlockId b)const{

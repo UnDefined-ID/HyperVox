@@ -1,5 +1,5 @@
 {
   "name": "HyperVox",
-  "version-string": "0.6",
+  "version-string": "0.9",
   "dependencies": [ "glfw3", "libpng", "zlib" ]
 }

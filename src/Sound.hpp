@@ -9,7 +9,7 @@
 #include <queue>
 #include <unordered_map>
 
-// Plays .ogg/.wav files from hypervox_sounds.zip (or a pre-extracted folder).
+// Plays .ogg/.wav files from minecraft-sounds.zip (or a pre-extracted folder).
 // Uses OpenAL if available at runtime; falls back to a silent stub gracefully.
 // All public methods are thread-safe and no-op when audio is unavailable.
 class Sound {
@@ -23,6 +23,8 @@ public:
 
     // play a Minecraft sound event (e.g. "block.stone.break", "player.jump")
     void play(const std::string& event, float vol=1.f, float pitch=1.f);
+    // maps a logical / legacy event name (e.g. "mob.cow.hurt") to the closest event that really exists in the sound pack (names depend on the pack version); "" = nothing suitable
+    std::string resolve(const std::string& event);
     // ambient: looping sounds (water, etc.) — call every frame while in the region
     void loop(const std::string& event, float vol=1.f);
     void stopLoop(const std::string& event);

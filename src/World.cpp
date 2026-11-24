@@ -91,6 +91,7 @@ void Chunk::unpack(uint16_t*dst,int layers)const{
 size_t Chunk::bytes()const{ size_t n=blocks.capacity()*2+sizeof(Chunk); for(auto&s:secs)n+=sizeof(Section)+s.palette.capacity()*2+s.data.capacity(); return n; }
 
 World::World(){}
+std::vector<std::array<int,3>> World::takeChanges(){ std::lock_guard<std::mutex> lg(m_lootMu); std::vector<std::array<int,3>> r; r.swap(m_changes); return r; }
 std::vector<std::array<int,3>> World::takeNewLootChests(){ std::lock_guard<std::mutex> lg(m_lootMu); std::vector<std::array<int,3>> r; r.swap(m_newLoot); return r; }
 void World::reset(uint64_t seed){std::unique_lock<std::shared_mutex> l(m_mu);m_chunks.clear();m_dirty.clear();m_generated.clear();m_loader=nullptr;m_seed64=seed;m_seed=uint32_t(seed)^(uint32_t(seed>>32)*2654435761u); }
 void World::setLoader(Loader l){std::unique_lock<std::shared_mutex> g(m_mu);m_loader=std::move(l);}
@@ -175,6 +176,7 @@ uint16_t World::get(int x,int y,int z)const{
 }
 
 int World::set(int x,int y,int z,uint16_t id,int out[3][2]){
+ { std::lock_guard<std::mutex> lg(m_lootMu); if(m_changes.size()<200000)m_changes.push_back({x,y,z}); }
  if(y<0||y>=Chunk::HEIGHT)return 0;
  const int cx=x>>4,cz=z>>4,lx=x&15,lz=z&15; const uint64_t k=key(cx,cz);
  auto cur=acquire(cx,cz,true);
@@ -353,11 +355,11 @@ ChunkMesh World::buildMesh(const ChunkSnapshot&s,int cx,int cz){
    for(int face=0;face<6;face++){
     const uint16_t n=nbr[face]; bool vis=(n==0);
     const BlockInfo&bi=R.info(id);
-    if(bi.fluid)vis=(n!=id);                 // fluids are never culled by solid neighbours (only by their own kind) and never hide the blocks next to them
+    if(bi.fluid)vis=(n==0)||R.baseOf(n)!=R.baseOf(id);   // fluids are never culled by solid neighbours (only by their own kind) and never hide the blocks next to them
     else if(!vis){ const uint8_t nf=flagsOf(n); vis=(nf&F_TRANSP)&&!((nf&F_CULLSAME)&&n==id); }
     if(!vis)continue;
     uint32_t val=bi.texture[face]+1u; if(fl&F_TRANSLUCENT)val|=TRANS; val|=((uint32_t(bi.rotq)>>(face*2))&3u)<<TURNSH;
-    if(bi.fluid){ val|=FLU; if(face!=0&&nbr[1]!=id&&(nbr[1]==0||(flagsOf(nbr[1])&F_TRANSP)))val|=LOW; }   // the surface is lowered only under open air - under a block it stays full height (no gap)
+    if(bi.fluid){ val|=FLU; if(face!=0&&(nbr[1]==0||(R.baseOf(nbr[1])!=R.baseOf(id)&&(flagsOf(nbr[1])&F_TRANSP))))val|=LOW; }   // the surface is lowered only under open air - under a block it stays full height (no gap)
     size_t idx,dep;
     if(face<2){ dep=static_cast<size_t>(y); idx=dep*256+static_cast<size_t>(z)*16+static_cast<size_t>(x); }
     else if(face<4){ dep=static_cast<size_t>(x); idx=dep*(16*static_cast<size_t>(H))+static_cast<size_t>(y)*16+static_cast<size_t>(z); }
@@ -402,6 +404,17 @@ ChunkMesh World::buildMesh(const ChunkSnapshot&s,int cx,int cz){
     if(!c&&!nn){ const uint16_t dn=nb(x+dx,y-1,z+dz); if(dn&&R.baseOf(dn)==R.redstoneWire)c=true; }
     if(c)mask|=1<<d; }
    if(const Model*wm=R.wireModel(mask)){ emitModel(out,*wm,x,y,z,bid,[&](int dx,int dy,int dz){return nb(x+dx,y+dy,z+dz);},flagsOf); continue; } }
+  if(bi.fluid){   // flowing water / lava (partial height): a box whose height follows the level; no faces towards the same liquid
+   const float hh=float(bi.height16)/16.f; const BlockId fb=R.baseOf(bid);
+   const uint16_t nbr6[6]={nb(x,y-1,z),nb(x,y+1,z),nb(x-1,y,z),nb(x+1,y,z),nb(x,y,z-1),nb(x,y,z+1)};
+   for(int f=0;f<6;f++){ const uint16_t n=nbr6[f]; if(n){ const BlockInfo&ni=R.info(n); const bool sameFam=ni.fluid&&R.baseOf(n)==fb;
+     if(sameFam){ if(f==0||f==1)continue; if(ni.height16>=bi.height16)continue; }
+     else if(f!=1&&ni.solid&&!ni.transparent&&!ni.fluid&&ni.height16>=16&&!ni.shape)continue; }
+    const int bucket=bi.translucent?7:kFaceBucket[f]; float ox=float(x),oy=float(y),oz=float(z),ww=1.f,hgt=1.f;
+    switch(f){ case 0: break; case 1: oy+=hh; break; case 2: hgt=hh; break; case 3: ox+=1.f; hgt=hh; break; case 4: hgt=hh; break; default: oz+=1.f; hgt=hh; break; }
+    addQuad(out,bucket,f,ox,oy,oz,ww,hgt,bi.texture[f]?bi.texture[f]:bi.texture[2]);
+    if(f==1){ auto&src=out.b[bucket]; const size_t m=src.size(); const Vertex q4[4]={src[m-4],src[m-3],src[m-2],src[m-1]}; auto&dst=out.b[bi.translucent?7:kFaceBucket[0]]; dst.insert(dst.end(),{q4[0],q4[3],q4[2],q4[1]}); } }
+   continue; }
   if(bi.model){ if(const Model*md=R.modelOf(bid)){ emitModel(out,*md,x,y,z,bid,[&](int dx,int dy,int dz){return nb(x+dx,y+dy,z+dz);},flagsOf); continue; } }
   if(bi.shape==Registry::SH_PLANT){   // crossed plant: two diagonal planes, each emitted twice (front + back) so the GPU can keep back-face culling on
    const uint32_t tex=bi.texture[2]; const float x0=float(x)+0.05f,x1=float(x)+0.95f,z0=float(z)+0.05f,z1=float(z)+0.95f,y0=float(y),y1=float(y)+1.f;

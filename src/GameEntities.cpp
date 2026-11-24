@@ -62,43 +62,48 @@ uint16_t Game::itemSpriteTile(ItemId id){
  renderer_->updateTiles(std::vector<TileUpdate>{tu}); return tile;
 }
 
-void Game::entitiesUpdate(float dt,double now){
- (void)now; if(!inWorld_)return; entitiesInit(); EntityEnv&E=entEnv_;
+// One game tick (20 per second, driven by Game::onTick so /tick rate and /tick freeze apply): entity AI, physics, spawning.
+void Game::entitiesTick(){
+ if(!inWorld_)return; entitiesInit(); EntityEnv&E=entEnv_; const double tm0=glfwGetTime();
  E.world=&world_; E.dim=cur_.dim; E.worldTime=(double)worldTime_; E.player=pos_; E.playerYaw=yaw_; E.playerPitch=pitch_; E.playerEye=eyeH_; E.playerAlive=!dead_; E.playerSurvival=cur_.mode==MODE_SURVIVAL; E.playerRiding=riding_;
  E.activeRadius=std::clamp(float(settings_.renderDistance*16)-24.f,48.f,110.f);
  if(cur_.dim==2&&!ents_.dragonSpawned&&!ents_.dragonDefeated&&cur_.mode!=MODE_SPECTATOR)ents_.setupEnd(E);
  if(riding_){
   auto kd=[&](int a){ return keyDown(settings_.keys[a]); };
-  if(keyPressed(settings_.keys[ACT_DOWN])||!ents_.find(ents_.riddenId)){ ents_.dismount(); riding_=false; }
-  else ents_.drive((kd(ACT_FWD)?1.f:0.f)-(kd(ACT_BACK)?1.f:0.f),(kd(ACT_RIGHT)?1.f:0.f)-(kd(ACT_LEFT)?1.f:0.f),false,dt,E);
+  if(!ents_.find(ents_.riddenId)){ ents_.dismount(); riding_=false; }
+  else ents_.drive((kd(ACT_FWD)?1.f:0.f)-(kd(ACT_BACK)?1.f:0.f),(kd(ACT_RIGHT)?1.f:0.f)-(kd(ACT_LEFT)?1.f:0.f),false,0.05f,E);
  }
  const bool wasDefeated=ents_.dragonDefeated;
- // entities run on a fixed 20 Hz tick (50 ms): several ticks when the frame was long, none when it was short; the picture is interpolated between ticks
- entAcc_+=std::min(dt,0.25f); int ticks=0; const double tm0=glfwGetTime();
- while(entAcc_>=0.05f&&ticks<3){ entAcc_-=0.05f; ticks++; tickCount_++;
-  if(riding_&&ticks>1){ /* later ticks of the same frame keep the same steering */ }
-  ents_.update(0.05f,E); }
- if(entAcc_>0.2f)entAcc_=0.05f;   // cannot keep up: drop the backlog, the tick rate shows it
- if(ticks>0){ const float ms=float((glfwGetTime()-tm0)*1000.0/ticks); msptEma_+=(ms-msptEma_)*0.1f; }
- tickWin_+=dt; if(tickWin_>=1.f){ tps_=float(tickCount_)/tickWin_; tickCount_=0; tickWin_=0.f; }
+ ents_.update(0.05f,E);
  if(ents_.dragonDefeated&&!wasDefeated){ std::ofstream f(saves_.regionDir(cur_.folder).parent_path()/"hypervox_dragon.txt"); f<<1<<"\n"; }
- if(riding_){ if(ents_.find(ents_.riddenId)){ pos_=ents_.ridePos(std::clamp(entAcc_/0.05f,0.f,1.f)); vel_=Vec3{}; onGround_=true; fallPeak_=pos_.y; } else riding_=false; }
+ const float ms=float((glfwGetTime()-tm0)*1000.0); msptEma_+=(ms-msptEma_)*0.1f;
+}
+
+// every frame: sneaking out of a vehicle, the rider follows the (interpolated) vehicle, the tick rate for the debug screen
+void Game::entitiesUpdate(float dt,double now){
+ (void)now; if(!inWorld_)return;
+ tickWin_+=dt; if(tickWin_>=1.f){ tps_=float(tickCount_)/tickWin_; tickCount_=0; tickWin_=0.f; }
+ if(riding_){
+  if(keyPressed(settings_.keys[ACT_DOWN])){ ents_.dismount(); riding_=false; }
+  else if(ents_.find(ents_.riddenId)){ pos_=ents_.ridePos(float(std::clamp(tickAcc_,0.0,1.0))); vel_=Vec3{}; onGround_=true; fallPeak_=pos_.y; }
+  else riding_=false;
+ }
 }
 
 void Game::entitiesRender(double now){
  if(!renderer_||!inWorld_)return; std::unordered_set<uint32_t> seen; static ChunkMesh mesh;
- const float alpha=std::clamp(entAcc_/0.05f,0.f,1.f);
+ const float alpha=(float)std::clamp(tickAcc_,0.0,1.0);
  for(const Entity&e0:ents_.list){
   if(e0.dead)continue; Entity e=e0; e.pos=Vec3{e0.prev.x+(e0.pos.x-e0.prev.x)*alpha,e0.prev.y+(e0.pos.y-e0.prev.y)*alpha,e0.prev.z+(e0.pos.z-e0.prev.z)*alpha}; { float dy=e0.yaw-e0.prevYaw; while(dy>3.14159f)dy-=6.28318f; while(dy<-3.14159f)dy+=6.28318f; e.yaw=e0.prevYaw+dy*alpha; } e.age=e0.age+alpha*0.05f; const float dx=e.pos.x-pos_.x,dz=e.pos.z-pos_.z; const float d2=dx*dx+dz*dz; const float maxD=e.type==EType::Dragon?220.f:std::min(112.f,float(settings_.renderDistance*16)); if(d2>maxD*maxD)continue;
   uint16_t tile=0; if(e.type==EType::Item)tile=itemSpriteTile(e.item); else if(e.type==EType::Fireball&&pack_.has("fx_fireball"))tile=pack_.id("fx_fireball"); else if(e.type==EType::DragonFireball&&pack_.has("fx_dragonfire"))tile=pack_.id("fx_dragonfire"); else if(e.type==EType::Arrow&&pack_.has("fx_arrow"))tile=pack_.id("fx_arrow");
   if(!buildEntityMesh(e,(float)now,tile,mesh))continue;
   const float rad=e.type==EType::Dragon?26.f:(e.type==EType::Ghast?6.f:std::max(2.f,e.h+1.f));
-  if(renderer_->uploadEntity(e.id,e.pos.x-kEntityMeshOffX,e.pos.y-kEntityMeshOffY,e.pos.z-kEntityMeshOffZ,rad,mesh))seen.insert(e.id);
+  if(renderer_->uploadEntity(e.id,e.pos.x-kEntityMeshOffX,e.pos.y-kEntityMeshOffY,e.pos.z-kEntityMeshOffZ,rad,mesh)||entUp_.count(e.id))seen.insert(e.id);   // upload refused this frame (staging busy): keep drawing the last mesh instead of making the mob blink
  }
  // end crystal beams: a glowing line from every crystal to the dragon it heals
  if(cur_.dim==2&&pack_.has("fx_dragonfire")){ const Entity*dr=nullptr; for(const Entity&e:ents_.list)if(e.type==EType::Dragon&&!e.dead)dr=&e; const uint16_t bt=pack_.id("fx_dragonfire");
   if(dr)for(const Entity&c:ents_.list){ if(c.type!=EType::Crystal||c.dead)continue; const Vec3 a{c.pos.x,c.pos.y+1.5f,c.pos.z},b{dr->pos.x,dr->pos.y+2.f,dr->pos.z}; if(std::sqrt((a.x-b.x)*(a.x-b.x)+(a.y-b.y)*(a.y-b.y)+(a.z-b.z)*(a.z-b.z))>60.f)continue;
-   for(int pc=0;pc<8;pc++){ Vec3 org; if(!buildBeamPiece(a,b,pc,bt,(float)now,mesh,org))break; const uint32_t id=0x40000000u+c.id*8u+(uint32_t)pc; if(renderer_->uploadEntity(id,org.x,org.y,org.z,14.f,mesh))seen.insert(id); } } }
+   for(int pc=0;pc<8;pc++){ Vec3 org; if(!buildBeamPiece(a,b,pc,bt,(float)now,mesh,org))break; const uint32_t id=0x40000000u+c.id*8u+(uint32_t)pc; if(renderer_->uploadEntity(id,org.x,org.y,org.z,14.f,mesh)||entUp_.count(id))seen.insert(id); } } }
  for(uint32_t id:entUp_)if(!seen.count(id))renderer_->releaseEntity(id);
  entUp_.swap(seen);
 }

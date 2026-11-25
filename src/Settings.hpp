@@ -21,6 +21,8 @@ struct Settings{
  int guiScale=0;               // (old absolute menu scale, no longer used)
  int guiDelta=0;               // menu scale adjustment on top of the window-fit size (-2..+2)
  int renderer=0;               // 0 = Vulkan, 1 = OpenGL (applied on the next start; Vulkan falls back to OpenGL automatically)
+ int maxFps=0;                 // 0 = unlimited, else 30..1000
+ int resX=1280,resY=720;       // window size in pixels
  std::string username="Player";
  std::string skin="default:wide/steve";   // "default:<wide|slim>/<name>" (texture pack) or "custom:<file>.png" (<data dir>/skins)
 

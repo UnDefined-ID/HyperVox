@@ -59,7 +59,7 @@ private:
   uint32_t freeUnits()const{ uint32_t t=0; for(auto&kv:freeList)t+=kv.second; return t; }
  };
  struct Tex{ VkDeviceSize bytes=0; VkImage img=VK_NULL_HANDLE; VkDeviceMemory mem=VK_NULL_HANDLE; VkImageView view=VK_NULL_HANDLE; VkSampler sampler=VK_NULL_HANDLE; uint32_t levels=1; };
- struct GpuChunk{ int cx,cz; uint32_t vOff,vCnt; uint32_t end[kBuckets]; int maxY; };   // vertices only (no index data): draw buckets end[] as in ChunkMesh, bucket 7 = translucent
+ struct GpuChunk{ int cx,cz; uint32_t vOff,vCnt; uint32_t end[kBuckets]; int maxY; int ox=0,oz=0; float scale=1.f; int size=16; };   // vertices only (no index data): draw buckets end[] as in ChunkMesh, bucket 7 = translucent
  struct Retired{ uint32_t vOff,vCnt; uint64_t frame; };
  static constexpr uint32_t kMaxUiQuads=16384, kMaxInstances=65536;
 

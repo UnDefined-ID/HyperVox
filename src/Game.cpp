@@ -179,7 +179,7 @@ Game::Hit Game::raycast(const Vec3&o,const Vec3&d,float maxDist,bool fluids)cons
  return h;
 }
 
-void Game::markDirtyAround(int,int,int n,int out[3][2]){ for(int i=0;i<n;i++)streamer_->markDirty(out[i][0],out[i][1]); }
+void Game::markDirtyAround(int,int,int n,int out[3][2]){ for(int i=0;i<n;i++)streamer_->markDirty(out[i][0],out[i][1],world_.lastEditY()); }
 // right click with a non-block item: buckets and armour
 bool Game::useItem(){
  const Registry&R=Registry::get(); InvSlot&h=cur_.inv.s[cur_.inv.selected]; const std::string n=R.itemName(h.id); const bool creative=cur_.mode==MODE_CREATIVE;
@@ -195,6 +195,16 @@ bool Game::useItem(){
     if(!f.hit||f.ny!=1)break; const uint16_t under=world_.get(f.x,f.y,f.z); const std::string un=under?R.blockName(R.baseOf(under)):std::string(); const bool cocoa=std::string(sd.second)=="cocoa";
     if(cocoa?(un.find("jungle_log")==std::string::npos):(un!="farmland"))break; if(world_.get(f.x,f.y+1,f.z))break;
     int o3[3][2]; const int n3=world_.set(f.x,f.y+1,f.z,crop,o3); markDirtyAround(f.x,f.z,n3,o3); blockSound(crop,1); if(cur_.mode!=MODE_CREATIVE)cur_.inv.consumeHeld(); markWorldDirty(); return true; } }
+ if(n.size()>10&&n.compare(n.size()-10,10,"_spawn_egg")==0){   // spawn eggs
+  static const std::pair<const char*,EType> eg[]={{"cow",EType::Cow},{"pig",EType::Pig},{"chicken",EType::Chicken},{"creeper",EType::Creeper},{"enderman",EType::Enderman},{"blaze",EType::Blaze},{"zombie",EType::Zombie},{"skeleton",EType::Skeleton},{"spider",EType::Spider},{"sheep",EType::Sheep},{"ghast",EType::Ghast},{"slime",EType::Slime},{"wolf",EType::Wolf},{"villager",EType::Villager}};
+  const std::string mob=n.substr(0,n.size()-10);
+  for(const auto&p:eg)if(mob==p.first){
+   const float cy2=std::cos(yaw_),sy2=std::sin(yaw_),cp2=std::cos(pitch_),sp3=std::sin(pitch_); const Vec3 eye2=pos_+Vec3{0.f,eyeH_,0.f},dir2{sy2*cp2,sp3,-cy2*cp2}; const Hit f2=raycast(eye2,dir2,creative?6.f:5.f,false);
+   if(!f2.hit)return true;
+   Entity&ne=ents_.spawn(p.second,Vec3{f2.x+0.5f+f2.nx*0.8f,f2.y+(f2.ny>0?1.f:0.f)+(f2.ny<0?-1.8f:0.f),f2.z+0.5f+f2.nz*0.8f});
+   if(p.second==EType::Slime){ ne.variant=2; ne.w=ne.h=1.04f; ne.health=ne.maxHealth=4.f; } if(p.second==EType::Ghast){ ne.pos.y+=2.f; ne.prev=ne.pos; }
+   if(!creative)cur_.inv.consumeHeld(); markWorldDirty(); return true; }
+  return true; }
  const bool empty=n=="bucket",water=n=="water_bucket",lava=n=="lava_bucket"; if(!empty&&!water&&!lava)return false;
  const float cy=std::cos(yaw_),sy=std::sin(yaw_),cp=std::cos(pitch_),sp=std::sin(pitch_); const Vec3 eye=pos_+Vec3{0.f,eyeH_,0.f},dir{sy*cp,sp,-cy*cp};
  const Hit f=raycast(eye,dir,creative?6.f:5.f,true); if(!f.hit)return true;
@@ -313,7 +323,7 @@ Mat4 Game::viewMatrix()const{
 
 void Game::updatePlay(float dt,const UiInput&in){
  const double now=in.time; const bool creative=cur_.mode==MODE_CREATIVE,spectator=cur_.mode==MODE_SPECTATOR;
- { tickAcc_+=double(dt)*double(tickRate_)/20.0; int ran=0; while((tickAcc_>=1.0||stepTicks_>0)&&ran<50){ if(tickAcc_>=1.0)tickAcc_-=1.0; else stepTicks_--; onTick(); ran++; } if(ran>=50){tickAcc_=0;stepTicks_=0;} }   // fixed 20 ticks per second at /tick rate 20 (0 = frozen, /tick step runs single ticks)
+ { tickAcc_+=double(dt)*double(tickRate_); int ran=0; while((tickAcc_>=1.0||stepTicks_>0)&&ran<50){ if(tickAcc_>=1.0)tickAcc_-=1.0; else stepTicks_--; onTick(); ran++; } if(ran>=50){tickAcc_=0;stepTicks_=0;} }   // fixed 20 ticks per second at /tick rate 20 (0 = frozen, /tick step runs single ticks)
  if(locateFut_.valid()&&locateFut_.wait_for(std::chrono::seconds(0))==std::future_status::ready)chat_.sys(locateFut_.get(),time_);
  updatePortals(dt);
  entitiesUpdate(dt,now);
@@ -567,7 +577,7 @@ void Game::frame(){
    if(keyPressed(GLFW_KEY_UP))chat_.histUp();
    if(keyPressed(GLFW_KEY_DOWN))chat_.histDown();
   }
-  if(keyPressed(GLFW_KEY_ENTER)){chat_.submit(now);if(!chat_.isOpen()||!glfwGetKey(win_,GLFW_KEY_T)){chat_.close();captureMouse(screen_==Screen::Play);}}
+  if(keyPressed(GLFW_KEY_ENTER)){chat_.name=settings_.username;chat_.submit(now);if(!chat_.isOpen()||!glfwGetKey(win_,GLFW_KEY_T)){chat_.close();captureMouse(screen_==Screen::Play);}}
  } else if(screen_==Screen::Loading)updateLoading();
  else if(screen_==Screen::Play)updatePlay(dt,in);
 

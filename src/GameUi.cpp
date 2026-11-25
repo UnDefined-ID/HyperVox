@@ -32,7 +32,7 @@ std::vector<std::string> Game::chatSuggest(size_t&tokStart)const{
  const std::string cur=lower(in.substr(tokStart)); const int argIdx=(int)std::count(in.begin(),in.end(),' ');
  std::string cmd; if(argIdx>0){ const size_t e=in.find(' '); cmd=lower(in.substr(1,e-1)); }
  std::vector<std::string> pool; const Registry&R=Registry::get();
- if(argIdx==0)pool={"clear","fly","gamemode","gamerule","gc","give","help","kill","locate","seed","setblock","summon","tick","time","tp","adaptive"};
+ if(argIdx==0)pool={"clear","fly","gamemode","gamerule","gc","give","help","kill","locate","seed","setblock","summon","tick","time","tp","adaptive","dimension","me","say"};
  else if(cmd=="gamemode"&&argIdx==1)pool={"survival","creative","spectator"};
  else if(cmd=="summon"&&argIdx==1)pool={"cow","pig","chicken","creeper","enderman","blaze","ender_dragon","end_crystal","boat","minecart","zombie","skeleton","spider","sheep","ghast","slime","wolf","villager"};
  else if(cmd=="adaptive"&&argIdx==1)pool={"on","off"};
@@ -328,6 +328,12 @@ void Game::screenOptions(){
    ui_.text("RAM "+std::to_string(rssMB_)+" / "+std::to_string(settings_.ramLimitMB)+" MB",rx,R(5)+6,COL_GRAY);
    if(!settings_.renderer&&ui_.button(rx,R(6),150,20,std::string("Mipmaps: ")+(settings_.mipmaps?"On":"Off")+" (restart)")){ settings_.mipmaps=!settings_.mipmaps; changed=true; }
    if(settings_.renderer)ui_.text("OpenGL: no mipmaps",rx+4,R(6)+6,COL_GRAY); }
+ { static const int caps[9]={30,60,90,120,144,165,200,240,0}; int ci=0; for(int i=0;i<9;i++)if(caps[i]==settings_.maxFps)ci=i;
+   if(ui_.button(lx,R(7),150,20,std::string("Max FPS: ")+(settings_.maxFps?std::to_string(settings_.maxFps):std::string("Unlimited")))){ settings_.maxFps=caps[(ci+1)%9]; changed=true; }
+   static std::string sx,sy; if(sx.empty()&&focus_!=10)sx=std::to_string(settings_.resX); if(sy.empty()&&focus_!=11)sy=std::to_string(settings_.resY);
+   ui_.textField(10,rx,R(7),42,20,sx,5,focus_); ui_.text("x",rx+45,R(7)+6,COL_GRAY); ui_.textField(11,rx+54,R(7),42,20,sy,5,focus_);
+   auto dig=[](std::string&s){ s.erase(std::remove_if(s.begin(),s.end(),[](char ch){return ch<'0'||ch>'9';}),s.end()); }; dig(sx); dig(sy);
+   if(ui_.button(rx+100,R(7),50,20,"Apply")&&!sx.empty()&&!sy.empty()){ settings_.resX=std::atoi(sx.c_str()); settings_.resY=std::atoi(sy.c_str()); settings_.clamp(); sx=std::to_string(settings_.resX); sy=std::to_string(settings_.resY); glfwSetWindowSize(win_,settings_.resX,settings_.resY); changed=true; } }
  if(ui_.sliderReleased()||changed)settings_.save();
  if(ui_.button(W/2-100,H-26,200,20,"Done")){settings_.save();screen_=optionsFrom_;}
 }

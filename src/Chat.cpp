@@ -21,10 +21,10 @@ bool Chat::submit(double now) {
         std::vector<std::string> args; std::istringstream ss(line.substr(1)); std::string tok;
         while(ss>>tok) args.push_back(tok);
         if(!args.empty()&&onCommand&&onCommand(args)) return false;
-        sys("Unknown command: /"+(!args.empty()?args[0]:""), now);
+        sys("Unknown or incomplete command, see below for error", now); sys("/"+(!args.empty()?args[0]:std::string())+"<--[HERE]", now);
         return false;
     }
-    say(line, now); return true;
+    say("<"+name+"> "+line, now); return true;
 }
 void Chat::say(const std::string& text, double now) {
     m_lines.push_front({text, now, false});

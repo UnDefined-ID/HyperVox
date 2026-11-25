@@ -66,8 +66,8 @@ bool VulkanRenderer::createPipeline(){
  VkShaderModule vmB=mod(vsB),fmB=mod(fsB),vmU=mod(vsU),fmU=mod(fsU),vmL=mod(vsL),fmL=mod(fsL);
  if(!vmB||!fmB||!vmU||!fmU||!vmL||!fmL)return false;
 
- VkVertexInputBindingDescription bindB[2]={{0,sizeof(Vertex),VK_VERTEX_INPUT_RATE_VERTEX},{1,sizeof(float)*3,VK_VERTEX_INPUT_RATE_INSTANCE}};
- VkVertexInputAttributeDescription attrB[3]={{0,0,VK_FORMAT_R32_UINT,0},{1,0,VK_FORMAT_R32_UINT,4},{2,1,VK_FORMAT_R32G32B32_SFLOAT,0}};
+ VkVertexInputBindingDescription bindB[2]={{0,sizeof(Vertex),VK_VERTEX_INPUT_RATE_VERTEX},{1,sizeof(float)*4,VK_VERTEX_INPUT_RATE_INSTANCE}};
+ VkVertexInputAttributeDescription attrB[3]={{0,0,VK_FORMAT_R32_UINT,0},{1,0,VK_FORMAT_R32_UINT,4},{2,1,VK_FORMAT_R32G32B32A32_SFLOAT,0}};
  VkPipelineVertexInputStateCreateInfo viB{VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};viB.vertexBindingDescriptionCount=2;viB.pVertexBindingDescriptions=bindB;viB.vertexAttributeDescriptionCount=3;viB.pVertexAttributeDescriptions=attrB;
  VkVertexInputBindingDescription bindU{0,sizeof(UiVertex),VK_VERTEX_INPUT_RATE_VERTEX};
  VkVertexInputAttributeDescription attrU[3]={{0,0,VK_FORMAT_R32G32_SFLOAT,offsetof(UiVertex,x)},{1,0,VK_FORMAT_R32G32_SFLOAT,offsetof(UiVertex,u)},{2,0,VK_FORMAT_R8G8B8A8_UNORM,offsetof(UiVertex,rgba)}};
@@ -168,7 +168,7 @@ bool VulkanRenderer::writeVertices(uint32_t vo,const Vertex*vp,uint32_t n){
  const size_t bytes=(size_t)n*sizeof(Vertex);
  if(!vtx.staged){ std::memcpy(vtx.mapped+(size_t)vo*sizeof(Vertex),vp,bytes); return true; }
  const int f=(int)frame;
- if(stageUsed[f]){ if(vkGetFenceStatus(device,inFlight[f])!=VK_SUCCESS){ stageBusy=true; return false; } stageHead[f]=0; stageUsed[f]=false; }   // the GPU has finished the copies recorded last time this slot was used
+ if(stageUsed[f]){ vkWaitForFences(device,1,&inFlight[f],VK_TRUE,UINT64_MAX); stageHead[f]=0; stageUsed[f]=false; }   // the GPU has finished the copies recorded last time this slot was used
  if(stageHead[f]+bytes>kStageBytes){ stageBusy=true; return false; }
  std::memcpy(stageMap[f]+stageHead[f],vp,bytes);
  VkBufferCopy cp{};cp.srcOffset=stageHead[f];cp.dstOffset=(VkDeviceSize)vo*sizeof(Vertex);cp.size=bytes; stageCopies[f].push_back(cp);
@@ -214,7 +214,7 @@ bool VulkanRenderer::createHostBuffer(VkDeviceSize size,VkBufferUsageFlags usage
 bool VulkanRenderer::createDynamicBuffers(){
  for(int i=0;i<2;i++){
   if(!createHostBuffer((VkDeviceSize)kMaxUiQuads*4*sizeof(UiVertex),VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,uiVB[i],uiVM[i],&uiMapped[i]))return false;
-  if(!createHostBuffer((VkDeviceSize)kMaxInstances*3*sizeof(float),VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,instVB[i],instVM[i],&instMapped[i]))return false;
+  if(!createHostBuffer((VkDeviceSize)kMaxInstances*4*sizeof(float),VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,instVB[i],instVM[i],&instMapped[i]))return false;
   if(!createHostBuffer(4096,VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,lineVB[i],lineVM[i],&lineMapped[i]))return false;
  }
  std::vector<uint32_t> ix;ix.reserve((size_t)kMaxUiQuads*6);
@@ -235,13 +235,13 @@ void VulkanRenderer::collectRetired(){
 bool VulkanRenderer::upload(int cx,int cz,const ChunkMesh&m){
  stageBusy=false;
  const uint64_t k=chunkKey(cx,cz); auto it=chunkIndex.find(k);
- if(m.vertices.empty()||m.vertices.size()>65535){ release(cx,cz); return true; }     // empty (or absurdly dense) chunk: nothing to draw
+ if(m.vertices.empty()||m.vertices.size()>(1u<<24)){ release(cx,cz); return true; }     // empty (or absurdly dense) chunk: nothing to draw
  const uint32_t vc=(uint32_t)m.vertices.size();
  // New chunks may only fill the arena to 92%: the rest is reserved so an edited chunk (break / place) can always be re-uploaded.
  if(it==chunkIndex.end()&&uint64_t(vtx.freeUnits())*100<uint64_t(vtx.capacity)*8)return false;
  const uint32_t vo=vtx.alloc(vc); if(vo==UINT32_MAX)return false;
  if(!writeVertices(vo,m.vertices.data(),vc)){ vtx.release(vo,vc); return false; }
- GpuChunk g{cx,cz,vo,vc,{},m.maxY}; for(int i=0;i<kBuckets;i++)g.end[i]=m.bucketEnd[i];
+ GpuChunk g{cx,cz,vo,vc,{},m.maxY}; for(int i=0;i<kBuckets;i++)g.end[i]=m.bucketEnd[i]; g.ox=m.ox;g.oz=m.oz;g.scale=m.scale;g.size=m.size;
  if(it!=chunkIndex.end()){ retire(chunkList[it->second]); chunkList[it->second]=g; }
  else { chunkIndex[k]=(uint32_t)chunkList.size(); chunkList.push_back(g); }
  return true;
@@ -319,32 +319,33 @@ void VulkanRenderer::record(VkCommandBuffer c,uint32_t image,const FrameParams&f
   VkBuffer bufs[2]={vtx.buf,instVB[frame]};VkDeviceSize offs[2]={0,0};
   vkCmdBindVertexBuffers(c,0,2,bufs,offs);vkCmdBindIndexBuffer(c,quadIB,0,VK_INDEX_TYPE_UINT16);
   float*inst=static_cast<float*>(instMapped[frame]); uint32_t n=0;
-  uint32_t indN=0; auto draw=[&](uint32_t indexCount,int32_t vOff,uint32_t instIdx){ if(mdi&&indN<kMaxInd){ indMap[frame][indN++]=VkDrawIndexedIndirectCommand{indexCount,1,0,vOff,instIdx}; } else vkCmdDrawIndexed(c,indexCount,1,0,vOff,instIdx); };
+  uint32_t indN=0; auto draw1=[&](uint32_t indexCount,int32_t vOff,uint32_t instIdx){ if(mdi&&indN<kMaxInd){ indMap[frame][indN++]=VkDrawIndexedIndirectCommand{indexCount,1,0,vOff,instIdx}; } else vkCmdDrawIndexed(c,indexCount,1,0,vOff,instIdx); };
+  auto draw=[&](uint32_t indexCount,int32_t vOff,uint32_t instIdx){ while(indexCount>98298u){ draw1(98298u,vOff,instIdx); indexCount-=98298u; vOff+=65532; } draw1(indexCount,vOff,instIdx); };   // merged meshes have more than 64K vertices: split into runs the 16-bit quad indices can address
   struct TV{float d;uint32_t gi,n;}; static std::vector<TV> visT; visT.clear();
   for(uint32_t gi=0;gi<(uint32_t)chunkList.size();gi++){
    const GpuChunk&g=chunkList[gi];
    if(n>=kMaxInstances)break;
-   if(!chunkInRange(g.cx-fp.chunkX,g.cz-fp.chunkZ,fp.renderDist))continue;
-   const float ox=float(g.cx*16)-fp.camera.x,oy=-fp.camera.y,oz=float(g.cz*16)-fp.camera.z;
-   if(!aabbVisible(fp.vp,ox,oy,oz,ox+16.f,oy+float(g.maxY),oz+16.f))continue;
-   inst[n*3]=ox;inst[n*3+1]=oy;inst[n*3+2]=oz;
+   if(g.size==16&&g.scale==1.f&&!chunkInRange((g.ox>>4)-fp.chunkX,(g.oz>>4)-fp.chunkZ,fp.renderDist))continue;
+   const float ox=float(g.ox)-fp.camera.x,oy=-fp.camera.y,oz=float(g.oz)-fp.camera.z;
+   if(!aabbVisible(fp.vp,ox,oy,oz,ox+float(g.size),oy+float(g.maxY),oz+float(g.size)))continue;
+   inst[n*4]=ox;inst[n*4+1]=oy;inst[n*4+2]=oz;inst[n*4+3]=g.scale;
    // only the faces that can point at the camera are drawn (the others are back faces anyway)
-   forEachBucketRun(g.end,visibleBuckets(ox,oy,oz,g.maxY),[&](uint32_t first,uint32_t count){ draw(count/4*6,(int32_t)(g.vOff+first),n); });
-   if(g.end[7]>g.end[6]){const float dx=ox+8.f,dz=oz+8.f;visT.push_back(TV{dx*dx+dz*dz,gi,n});}
+   forEachBucketRun(g.end,visibleBuckets(ox,oy,oz,g.maxY,float(g.size)),[&](uint32_t first,uint32_t count){ draw(count/4*6,(int32_t)(g.vOff+first),n); });
+   if(g.end[7]>g.end[6]){const float dx=ox+float(g.size)*0.5f,dz=oz+float(g.size)*0.5f;visT.push_back(TV{dx*dx+dz*dz,gi,n});}
    n++;
   }
   for(const auto&kv:ents){   // entities (mobs, items, boats ...): each is a small mesh drawn like a chunk
    const EntDraw&d=kv.second; if(n>=kMaxInstances)break;
    const float ox=d.x-fp.camera.x,oy=d.y-fp.camera.y,oz=d.z-fp.camera.z; const float cx=ox+16.f,cy=oy+2.f,cz=oz+16.f;
    if(!aabbVisible(fp.vp,cx-d.r,cy-d.r,cz-d.r,cx+d.r,cy+d.r,cz+d.r))continue;
-   inst[n*3]=ox;inst[n*3+1]=oy;inst[n*3+2]=oz; draw(d.vCnt/4*6,(int32_t)d.vOff,n); n++;
+   inst[n*4]=ox;inst[n*4+1]=oy;inst[n*4+2]=oz;inst[n*4+3]=1.f; draw(d.vCnt/4*6,(int32_t)d.vOff,n); n++;
   }
   if(indN)vkCmdDrawIndexedIndirect(c,indBuf[frame],0,indN,(uint32_t)sizeof(VkDrawIndexedIndirectCommand));   // every opaque chunk and entity in ONE call
   lastDrawn=n;
   if(!visT.empty()){   // translucent pass: far to near, alpha blended, no depth writes
    std::sort(visT.begin(),visT.end(),[](const TV&a,const TV&b){return a.d>b.d;});
    vkCmdBindPipeline(c,VK_PIPELINE_BIND_POINT_GRAPHICS,transPipeline);
-   for(const TV&t:visT){const GpuChunk&g=chunkList[t.gi]; vkCmdDrawIndexed(c,(g.end[7]-g.end[6])/4*6,1,0,(int32_t)(g.vOff+g.end[6]),t.n);}
+   for(const TV&t:visT){const GpuChunk&g=chunkList[t.gi]; uint32_t ci=(g.end[7]-g.end[6])/4*6; int32_t vo=(int32_t)(g.vOff+g.end[6]); while(ci>0){ const uint32_t k=std::min(ci,98298u); vkCmdDrawIndexed(c,k,1,0,vo,t.n); ci-=k; vo+=65532; } }
   }
  }
  if(fp.world&&fp.outline){

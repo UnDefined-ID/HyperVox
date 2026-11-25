@@ -6,6 +6,8 @@
 #elif defined(__APPLE__)
 #include <mach-o/dyld.h>
 #endif
+#include <chrono>
+#include <thread>
 #include <filesystem>
 #include <iostream>
 #include <memory>
@@ -14,13 +16,14 @@
 #include "Log.hpp"
 #include "VulkanRenderer.hpp"
 
+static int g_resX=1280,g_resY=720;
 static GLFWwindow* makeWindow(bool opengl){
  glfwDefaultWindowHints(); glfwWindowHint(GLFW_RESIZABLE,GLFW_TRUE);
  if(opengl){
   glfwWindowHint(GLFW_CLIENT_API,GLFW_OPENGL_API); glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR,3); glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR,3);
   glfwWindowHint(GLFW_OPENGL_PROFILE,GLFW_OPENGL_CORE_PROFILE); glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT,GLFW_TRUE); glfwWindowHint(GLFW_SRGB_CAPABLE,GLFW_TRUE);
  } else glfwWindowHint(GLFW_CLIENT_API,GLFW_NO_API);
- return glfwCreateWindow(1280,720,"hypervox",nullptr,nullptr);
+ return glfwCreateWindow(g_resX,g_resY,"hypervox",nullptr,nullptr);
 }
 
 int main(int argc,char**argv){
@@ -38,7 +41,7 @@ int main(int argc,char**argv){
   if(!exe.empty()&&exe.has_parent_path())std::filesystem::current_path(exe.parent_path(),ec);
  }
  if(!glfwInit()){std::cerr<<"GLFW init failed\n";return 1;}
- Settings pre; pre.load();
+ Settings pre; pre.load(); g_resX=pre.resX; g_resY=pre.resY;
  // Vulkan is the default; OpenGL is used when it is selected in the options, when the device has no Vulkan, or when Vulkan fails to start.
  bool tryGL=pre.renderer==1||!glfwVulkanSupported();
  if(!glfwVulkanSupported())std::cout<<"Vulkan is not available on this device - using OpenGL.\n";
@@ -59,7 +62,13 @@ int main(int argc,char**argv){
     }else{
      std::cout<<"Renderer: "<<renderer->name()<<"\n";
      game.attach(renderer.get());
-     while(!glfwWindowShouldClose(window)){glfwPollEvents();game.frame();}
+     { using clk=std::chrono::steady_clock; auto next=clk::now();
+      while(!glfwWindowShouldClose(window)){
+       glfwPollEvents(); game.frame();
+       const int cap=game.settings().maxFps;
+       if(cap>0){ next+=std::chrono::duration_cast<clk::duration>(std::chrono::duration<double>(1.0/cap)); const auto now=clk::now();
+        if(next<now)next=now; else { if(next-now>std::chrono::milliseconds(2))std::this_thread::sleep_for(next-now-std::chrono::milliseconds(1)); while(clk::now()<next)std::this_thread::yield(); } }
+       else next=clk::now(); } }
      game.shutdown(); renderer->shutdown(); rc=0;
     }
    }

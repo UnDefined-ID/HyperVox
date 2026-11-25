@@ -16,6 +16,18 @@ struct ItemRow{const char*name,*icon,*display;int tab;};
 const ItemRow kItems[]={
 #include "ItemList.inc"
 };
+bool frameItem(const std::string&n){   // animation frames and held-item variants of the pack's item textures
+ size_t i=n.size(); while(i>0&&std::isdigit((unsigned char)n[i-1]))i--;
+ if(i>0&&i<n.size()&&n[i-1]=='_'&&n!="disc_fragment_5"&&n!="music_disc_5"&&n!="music_disc_11"&&n!="music_disc_13")return true;
+ static const char*bad[]={"_pulling","_charged","_in_hand","_throwing","_cast","_blocking","_broken","bundle_open","markings","tipped_arrow_head","tipped_arrow_base","crossbow_arrow","crossbow_firework","_model"};
+ for(const char*b:bad)if(n.find(b)!=std::string::npos)return true; return false; }
+bool eggOk(const std::string&n){   // spawn eggs only for mobs the game has
+ static const char*m[]={"cow","pig","chicken","creeper","enderman","blaze","zombie","skeleton","spider","sheep","ghast","slime","wolf","villager"};
+ for(const char*x:m)if(n==std::string(x)+"_spawn_egg")return true; return false; }
+bool hiddenItem(const std::string&n){   // technical blocks that are not obtainable items (still usable with /give and /setblock)
+ static const char*h[]={"kelp_plant","attached_pumpkin_stem","attached_melon_stem","pumpkin_stem","melon_stem","big_dripleaf_stem","fire","soul_fire","tripwire","redstone_wire","twisting_vines_plant","weeping_vines_plant","cave_vines_plant","cave_vines","sweet_berry_bush","missing","test_block","farmland","frosted_ice","powder_snow"};
+ for(const char*x:h)if(n==x)return true;
+ return n.compare(0,9,"infested_")==0||(n.size()>=9&&n.compare(n.size()-9,9,"_wall_fan")==0); }
 int parseFlags(const char*f){int r=0;for(;*f;f++){if(*f=='T')r|=F_T;else if(*f=='S')r|=F_S;else if(*f=='L')r|=F_L;else if(*f=='U')r|=F_U;}return r;}
 const char* kTabNames[Registry::kTabCount]={"Building Blocks","Natural Blocks","Colored Blocks","Functional Blocks","Tools & Armor","Food & Drinks","Ingredients","Redstone Blocks","Survival Inventory"};
 const char* kTabIcons[Registry::kTabCount]={"bricks","grass_block","red_wool","crafting_table","iron_pickaxe","apple","iron_ingot","redstone","chest"};
@@ -343,18 +355,18 @@ void Registry::init(const TexturePack&pack){
    auto pretty=[](std::string s){ bool up=true; for(auto&ch:s){ if(ch=='_'){ch=' ';up=true;} else if(up){ch=(char)std::toupper((unsigned char)ch);up=false;} } return s; };
    for(const std::string&n:names){
     if(m_itemIds.count(n)||(m_blockIds.count(n)&&n!="wheat"&&n!="bamboo"))continue;   // (the crop / pole blocks share a name with the item)
-    if(ends(n,"_overlay")||has(n,"spawn_egg")||has(n,"debug")||has(n,"template")||has(n,"empty_slot")||has(n,"empty_armor")||n=="air"||has(n,"_trim")&&false)continue;
+    if(ends(n,"_overlay")||(has(n,"spawn_egg")&&!eggOk(n))||frameItem(n)||has(n,"debug")||has(n,"template")||has(n,"empty_slot")||has(n,"empty_armor")||n=="air"||has(n,"_trim")&&false)continue;
     int tab=6;
     if(ends(n,"_sword")||ends(n,"_pickaxe")||ends(n,"_axe")||ends(n,"_shovel")||ends(n,"_hoe")||ends(n,"_helmet")||ends(n,"_chestplate")||ends(n,"_leggings")||ends(n,"_boots")||ends(n,"_horse_armor")||ends(n,"_spear")||n=="bow"||n=="crossbow"||n=="shield"||n=="fishing_rod"||n=="shears"||n=="flint_and_steel"||n=="trident"||n=="mace"||n=="elytra"||n=="spyglass"||n=="brush"||n=="arrow"||n=="carrot_on_a_stick"||n=="warped_fungus_on_a_stick"||n=="totem_of_undying")tab=4;
     else if(has(n,"apple")||has(n,"bread")||has(n,"beef")||has(n,"porkchop")||has(n,"chicken")||has(n,"mutton")||has(n,"rabbit")||has(n,"cod")||has(n,"salmon")||has(n,"potato")||has(n,"carrot")||has(n,"stew")||has(n,"soup")||has(n,"cookie")||has(n,"pie")||has(n,"melon_slice")||has(n,"berries")||has(n,"dried_kelp")||has(n,"honey_bottle")||has(n,"rotten_flesh")||has(n,"spider_eye")||has(n,"chorus_fruit")||has(n,"beetroot")||has(n,"potion")||n=="milk_bucket"||n=="tropical_fish"||n=="pufferfish")tab=5;
     else if(has(n,"redstone")||n=="repeater"||n=="comparator"||n=="lever"||n=="hopper"||n=="observer"||has(n,"minecart"))tab=7;
     else if(has(n,"door")||has(n,"sign")||has(n,"_bed")||has(n,"boat")||has(n,"raft")||n=="ladder"||n=="painting"||n=="item_frame"||n=="glow_item_frame"||n=="armor_stand"||has(n,"bucket")||n=="bell"||n=="lantern"||n=="soul_lantern"||n=="campfire"||n=="cauldron"||n=="flower_pot"||n=="compass"||n=="clock"||n=="map"||n=="lead"||n=="name_tag"||n=="saddle"||has(n,"banner")||has(n,"shulker_box"))tab=3;
-    ItemInfo it; it.name=n; it.display=pretty(n); it.iconName=n; it.tab=tab; const ItemId id=(ItemId)(kItemBase+m_items.size()); m_items.push_back(it); m_itemIds[n]=id; m_tabItems[tab].push_back(id);
+    if(has(n,"spawn_egg"))tab=3; ItemInfo it; it.name=n; it.display=pretty(n); it.iconName=n; it.tab=tab; const ItemId id=(ItemId)(kItemBase+m_items.size()); m_items.push_back(it); m_itemIds[n]=id; m_tabItems[tab].push_back(id);
    } }
  for(const char*n:{"redstone","redstone_block","redstone_lamp","redstone_torch","repeater","comparator","observer","piston","sticky_piston","dispenser","dropper","hopper","tnt","note_block","target","lever","daylight_detector","lightning_rod","slime_block","honey_block","rail","powered_rail","detector_rail","activator_rail","oak_pressure_plate","stone_pressure_plate","oak_button","stone_button","tripwire_hook","trapped_chest","iron_door","oak_door","oak_trapdoor","iron_trapdoor","oak_fence_gate","jukebox"}){
   const ItemId it=itemByName(n); if(it)m_tabItems[7].push_back(it); }
  m_tabItems[8].clear();
- for(auto&tab:m_tabItems)tab.erase(std::remove_if(tab.begin(),tab.end(),[&](ItemId i){const std::string n=itemName(i);return n=="water"||n=="lava";}),tab.end());   // use the buckets instead
+ for(auto&tab:m_tabItems)tab.erase(std::remove_if(tab.begin(),tab.end(),[&](ItemId i){const std::string n=itemName(i);return n=="water"||n=="lava"||hiddenItem(n);}),tab.end());   // use the buckets instead
  for(int t=0;t<kTabCount;t++){m_tabIcon[t]=itemByName(kTabIcons[t]); if(!m_tabIcon[t]&&!m_tabItems[t].empty())m_tabIcon[t]=m_tabItems[t][0];}
  missing=blockByName("missing"); stone=blockByName("stone");dirt=blockByName("dirt");grass=blockByName("grass_block");sand=blockByName("sand");water=blockByName("water");
  log=blockByName("oak_log");leaves=blockByName("oak_leaves");bedrock=blockByName("bedrock");gravel=blockByName("gravel");cobble=blockByName("cobblestone");sandstone=blockByName("sandstone");
@@ -437,6 +449,7 @@ bool Registry::stateOf(BlockId b,std::string&mcName,std::vector<std::pair<std::s
  props.clear();
  if(!m_mcNameOf[base].empty()){ mcName=m_mcNameOf[base]; }
  else if(!k)return false; else mcName=m_blockNames[base];
+ if(!k&&mcName.size()>=4&&mcName.compare(mcName.size()-4,4,"rail")==0){ int s=0; for(int i=0;i<12;i++)if(m_variants[base][i]==b)s=i; static const char*sn[10]={"north_south","east_west","ascending_east","ascending_west","ascending_north","ascending_south","south_east","south_west","north_west","north_east"}; const bool plain=mcName=="rail"; props.push_back({"shape",sn[plain?s:s%6]}); if(!plain)props.push_back({"powered",s>=6?"true":"false"}); return true; }
  if(!k)return true;
  if(k==8||k==9){ int s=0; for(int i=0;i<16;i++)if(m_variants[base][i]==b)s=i; static const char*f4[4]={"north","east","south","west"}; const bool gate=mcName.size()>=10&&mcName.compare(mcName.size()-10,10,"fence_gate")==0,trap=mcName.size()>=8&&mcName.compare(mcName.size()-8,8,"trapdoor")==0;
   props.push_back({"facing",f4[s&3]}); if(!gate)props.push_back({"half",trap?((s&8)?"top":"bottom"):(k==9?"upper":"lower")}); if(!trap&&!gate)props.push_back({"hinge",(s&8)?"right":"left"}); props.push_back({"open",(s&4)?"true":"false"}); return true; }
@@ -458,7 +471,11 @@ bool Registry::stateOf(BlockId b,std::string&mcName,std::vector<std::pair<std::s
  return true;
 }
 BlockId Registry::withState(BlockId base,const std::string&axis,const std::string&facing,const std::string&half,const std::string&type)const{
- base=baseOf(base); if(base>=m_rotKind.size()||!m_rotKind[base])return base; const auto&v=m_variants[base]; const uint8_t k=m_rotKind[base]; int s=0;
+ base=baseOf(base);
+ if(base<m_blockNames.size()&&m_blockNames[base].size()>=4&&m_blockNames[base].compare(m_blockNames[base].size()-4,4,"rail")==0&&type.size()>1&&type[0]=='R'){
+  static const char*sn[10]={"north_south","east_west","ascending_east","ascending_west","ascending_north","ascending_south","south_east","south_west","north_west","north_east"}; const bool on=type.find("+on")!=std::string::npos; const size_t pl=type.find('+'); const std::string sh=type.substr(1,pl==std::string::npos?std::string::npos:pl-1); const bool plain=m_blockNames[base]=="rail"; int sl=0; for(int i=0;i<10;i++)if(sh==sn[i]){sl=i;break;} if(!plain&&sl>=6)sl=0;
+  const int slot=plain?sl:(sl+(on?6:0)); return m_variants[base][slot]?m_variants[base][slot]:base; }
+ if(base>=m_rotKind.size()||!m_rotKind[base])return base; const auto&v=m_variants[base]; const uint8_t k=m_rotKind[base]; int s=0;
  if(k==19){ return axis=="z"&&netherPortalZ?netherPortalZ:base; }
  if(k==20){ const int f=facing=="east"?1:facing=="south"?2:facing=="west"?3:0; const int s=f+(type.find("Etrue")!=std::string::npos?4:0); const BlockId n=v[s]; return n?n:base; }
  if(k==18){ const int f=facing=="east"?1:facing=="south"?2:facing=="west"?3:0; const int s=f+(type.find("Phead")!=std::string::npos?4:0); const BlockId n=v[s]; return n?n:base; }

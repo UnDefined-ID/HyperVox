@@ -11,66 +11,60 @@
 #include <vector>
 #include "World.hpp"
 
-// Receives finished chunk meshes (implemented by the Vulkan renderer).
+// Receives finished chunk meshes (implemented by the Vulkan / OpenGL renderer).  (cx,cz) is just the two halves of a 64-bit mesh key, see keyOf() in Streamer.cpp.
 struct ChunkSink{
  virtual ~ChunkSink()=default;
  virtual bool upload(int cx,int cz,const ChunkMesh&m)=0;   // false = out of GPU memory
  virtual void release(int cx,int cz)=0;
  virtual void clear()=0;
- virtual bool uploadBusy()const{return false;}                    // the last upload failed only because the staging buffer is busy this frame: try again next frame (NOT out of memory)
- virtual float fillRatio()const{return 0.f;}               // 0..1: how full the GPU chunk memory is
+ virtual bool uploadBusy()const{return false;}
+ virtual float fillRatio()const{return 0.f;}
 };
 
 inline bool chunkInRange(int dx,int dz,int r){return dx*dx+dz*dz<=r*r+r;}
 
-// Horizontal view cone used to keep only the chunks you can actually see on the GPU.
+// (kept for Game.cpp; the tiered streamer no longer needs a view cone)
 struct ViewCone{
- float px=0,pz=0,dx=0,dz=1,halfL=4.f,halfU=4.f;                    // halfL/halfU: half angle (rad) to load / to keep; >= pi means "everything"
- int nearChunks=3;                                                // chunks this close are always resident (all directions)
+ float px=0,pz=0,dx=0,dz=1,halfL=4.f,halfU=4.f; int nearChunks=3;
  static ViewCone make(float px,float pz,float yaw,float halfAngle,float loadMargin,float unloadMargin){
   ViewCone v; v.px=px; v.pz=pz; v.dx=std::sin(yaw); v.dz=-std::cos(yaw); v.halfL=halfAngle+loadMargin; v.halfU=halfAngle+unloadMargin; return v;
  }
- bool sees(int cx,int cz,bool unload)const{
-  const float A=unload?halfU:halfL; if(A>=3.1415f)return true;
-  const float vx=float(cx*16+8)-px,vz=float(cz*16+8)-pz,len2=vx*vx+vz*vz;
-  if(len2<float(nearChunks*16)*float(nearChunks*16))return true;
-  const float len=std::sqrt(len2),d=(vx*dx+vz*dz)/len;
-  const float a=A+std::asin(std::min(1.f,11.5f/len));                // a chunk is ~11.3 blocks wide diagonally
-  return a>=3.1415f||d>=std::cos(a);
- }
+ bool sees(int,int,bool)const{return true;}
 };
 
-// Streams chunk meshes around the player: closest-first generation + greedy meshing on worker threads,
-// uploads on the calling (main) thread.  There is no upper limit on the radius except GPU memory.
+// One drawable mesh.  tier 0 = 16x16x16 section of the player's chunk, 1 = one chunk, 2 = 3x3 chunks, 3 = 9x9 chunks (x,z in units of that tier's size).
+struct MeshCell{ int tier=1,x=0,z=0,sec=0; };
+
+// Tiered streaming: the player's chunk is meshed per section, the chunks around it one mesh each, then rings of 3x3-chunk and 9x9-chunk meshes (same idea as a
+// clipmap).  Cells sit on a fixed grid, so moving only builds the cells that appear; edits rebuild one section (or one chunk) and flag the big cells above it.
 class ChunkStreamer{
 public:
  ChunkStreamer(World&w,ChunkSink&s);
  ~ChunkStreamer();
- void reset();                                   // forget everything (call before switching worlds)
- void setPaused(bool p){m_paused=p;}                        // memory pressure: stop queueing new chunks
- void setCacheRadius(int r){m_cacheR=r;m_needScan=true;}   // CPU chunk cache radius (chunks)
- void trim();                                               // drop everything outside the exact view cone + shrink the CPU cache now
- void update(int pcx,int pcz,int radius,const ViewCone&view);   // call every frame
- void pump(int maxUploads);                      // upload finished meshes
- void markDirty(int cx,int cz);                  // block changed: re-mesh with top priority
+ void reset();
+ void setPaused(bool p){m_paused=p;}
+ void setCacheRadius(int r){m_cacheR=r;m_needScan=true;}
+ void trim();
+ void update(int pcx,int pcz,int radius,const ViewCone&view);
+ void pump(int maxUploads);
+ void markDirty(int cx,int cz,int y=-1);        // block changed (y < 0: unknown, whole chunk)
  bool isMeshed(int cx,int cz)const;
  size_t meshedCount()const{return m_meshed.size();}
  size_t pendingCount();
  bool gpuFull()const{return m_gpuFull;}
 private:
- std::vector<std::pair<int,int>> m_edits; std::unordered_set<uint64_t> m_editSet;   // main thread only: chunks to re-mesh right away
- struct Job{int cx,cz;uint32_t ver;};
- struct Result{int cx,cz;uint32_t ver;uint64_t epoch;ChunkMesh mesh;};
- static uint64_t key(int cx,int cz){return (static_cast<uint64_t>(static_cast<uint32_t>(cx))<<32)|static_cast<uint32_t>(cz);}
- void worker();
- void scan();
+ struct Job{MeshCell c;uint32_t ver;};
+ struct Result{MeshCell c;uint32_t ver;uint64_t epoch;ChunkMesh mesh;};
+ struct Meshed{MeshCell c;uint32_t ver=0;};
+ void worker(); void scan(); void releaseCovered(); void rebuildNow(const MeshCell&c); void queueRebuild(const MeshCell&c);
+ ChunkMesh buildCell(const MeshCell&c)const;
  World& m_world; ChunkSink& m_sink;
  std::vector<std::thread> m_threads; bool m_stop=false;
  std::mutex m_mu; std::condition_variable m_cv,m_idleCv;
  std::deque<Job> m_queue; std::unordered_set<uint64_t> m_queued,m_inflight; std::vector<Result> m_results; uint64_t m_epoch=0;
- // main-thread state
- std::unordered_map<uint64_t,uint32_t> m_meshed; std::unordered_map<uint64_t,uint32_t> m_version;
- std::vector<std::pair<int,int>> m_offsets; int m_offR=-1;
- bool m_paused=false; int m_cacheR=12; ViewCone m_view; float m_scanDx=0,m_scanDz=1; bool wanted(int cx,int cz,bool unload)const{return m_view.sees(cx,cz,unload);}
- int m_cx=0,m_cz=0,m_r=0; bool m_haveCenter=false,m_needScan=true,m_gpuFull=false,m_allQueued=false; double m_lastScan=0; size_t m_cap=64; uint32_t m_verCounter=0;
+ // main thread only
+ std::unordered_map<uint64_t,Meshed> m_meshed; std::unordered_map<uint64_t,uint32_t> m_version;
+ std::vector<MeshCell> m_want; std::unordered_set<uint64_t> m_wantSet,m_split;
+ std::unordered_map<uint64_t,uint32_t> m_editMap; std::vector<uint64_t> m_editOrder;
+ bool m_paused=false; int m_cacheR=16; int m_cx=0,m_cz=0,m_r=0,m_playerSecs=0; bool m_haveCenter=false,m_needScan=true,m_gpuFull=false,m_allQueued=false; double m_lastScan=0; size_t m_cap=64; uint32_t m_verCounter=0;
 };

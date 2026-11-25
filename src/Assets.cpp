@@ -130,7 +130,8 @@ fs::path ensureDataFolder(const char*kind){
  auto stampOf=[&](const fs::path&z){ const auto t=fs::last_write_time(z,ec).time_since_epoch().count(); return z.filename().string()+"|"+std::to_string((unsigned long long)fs::file_size(z,ec))+"|"+std::to_string((long long)t); };
  // the zip that should be unpacked: one next to the game, else the copy linked into the executable
  std::vector<fs::path> dirs{fs::current_path(ec),fs::current_path(ec)/"assets",fs::current_path(ec).parent_path(),fs::current_path(ec).parent_path()/"assets",data};
- fs::path zip; for(auto&d:dirs){ if(!zip.empty())break; if(!fs::is_directory(d,ec))continue;
+ fs::path zip; { const char*fn=tex?"hypervox_assets.zip":"hypervox_sounds.zip"; for(auto&d:dirs){ if(!d.empty()&&fs::is_regular_file(d/fn,ec)){ zip=d/fn; break; } } }
+ for(auto&d:dirs){ if(!zip.empty())break; if(!fs::is_directory(d,ec))continue;
   for(auto&e:fs::directory_iterator(d,ec)){ std::string lo=e.path().filename().string(); for(auto&ch:lo)ch=(char)std::tolower((unsigned char)ch);
    if(lo.size()<4||lo.compare(lo.size()-4,4,".zip")!=0||lo.find(tex?"assets":"sound")==std::string::npos||lo[0]=='.')continue; if(zip.empty()||fs::last_write_time(e.path(),ec)>fs::last_write_time(zip,ec))zip=e.path(); } }
  const EmbeddedBlob emb=embeddedBlob(tex?"assets":"sounds"); const std::string want=!zip.empty()?stampOf(zip):(emb.p?std::string("embedded|")+std::to_string(emb.n):std::string());

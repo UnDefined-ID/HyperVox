@@ -176,7 +176,7 @@ uint16_t World::get(int x,int y,int z)const{
 }
 
 int World::set(int x,int y,int z,uint16_t id,int out[3][2]){
- { std::lock_guard<std::mutex> lg(m_lootMu); if(m_changes.size()<200000)m_changes.push_back({x,y,z}); }
+ { std::lock_guard<std::mutex> lg(m_lootMu); if(m_changes.size()<200000)m_changes.push_back({x,y,z}); m_lastY=y; }
  if(y<0||y>=Chunk::HEIGHT)return 0;
  const int cx=x>>4,cz=z>>4,lx=x&15,lz=z&15; const uint64_t k=key(cx,cz);
  auto cur=acquire(cx,cz,true);
@@ -322,9 +322,9 @@ const std::vector<uint8_t>& blockFlags(){   // compact per-block flags so the me
 
 // One pass over the chunk: every cube face that is not hidden by an opaque neighbour goes into a per-face mask, the masks are greedy-merged into quads,
 // and the quads are grouped by direction (see ChunkMesh) so the renderers can skip the faces that point away from the camera.
-ChunkMesh World::buildMesh(const ChunkSnapshot&s,int cx,int cz){
+ChunkMesh World::buildMesh(const ChunkSnapshot&s,int cx,int cz,int ys,int ye){
  ChunkMesh res; if(!s.c)return res;
- const Chunk&c=*s.c; const int N=16,H=c.maxY+1; if(H<=0)return res;
+ const Chunk&c=*s.c; const int N=16,H=c.maxY+1; if(H<=0)return res; const int yLo=std::max(0,ys),yHi=std::min(H,ye); if(yLo>=yHi)return res;
  const Registry&R=Registry::get(); const std::vector<uint8_t>&FL=blockFlags(); const size_t nFl=FL.size();
  auto flagsOf=[&](uint16_t id)->uint8_t{ return id<nFl?FL[id]:FL[nFl-1]; };
  // padded copy of the chunk (1 block border from the 4 neighbours, 1 layer of air above and below) so neighbour tests are plain array reads
@@ -342,9 +342,10 @@ ChunkMesh World::buildMesh(const ChunkSnapshot&s,int cx,int cz){
  constexpr uint32_t FLU=1u<<28,LOW=1u<<29,TRANS=1u<<30,TEXM=(1u<<14)-1u,TURNSH=26;
  static thread_local std::vector<uint32_t> mk[6]; static thread_local std::vector<uint16_t> cnt[6];
  const size_t total=static_cast<size_t>(H)*256;
- for(int f=0;f<6;f++){ mk[f].assign(total,0u); cnt[f].assign(static_cast<size_t>(f<2?H:N),uint16_t(0)); }
+ for(int f=0;f<6;f++){ if(mk[f].size()<total)mk[f].resize(total,0u); cnt[f].assign(static_cast<size_t>(f<2?H:N),uint16_t(0)); }
  static thread_local std::vector<std::array<int,3>> partial; partial.clear();   // blocks with a shape smaller than a cube
- for(int y=0;y<H;y++)for(int z=0;z<N;z++){
+ for(int y=yLo;y<yHi;y++)for(int z=0;z<N;z++){
+  if(c.packed()){ const Chunk::Section&sc=c.secs[size_t(y>>4)]; if(sc.bits==0&&sc.single==0)continue; }
   const uint16_t*row=&pad[P(0,y,z)];
   for(int x=0;x<N;x++){
    const uint16_t id=row[x]; if(!id)continue;
@@ -371,10 +372,10 @@ ChunkMesh World::buildMesh(const ChunkSnapshot&s,int cx,int cz){
  MeshOut out;
  for(int face=0;face<6;face++){
   const int depth=face<2?H:N, U=N, V=face<2?N:H;
-  for(int d=0;d<depth;d++){
+  for(int d=(face<2?yLo:0);d<(face<2?yHi:depth);d++){
    if(!cnt[face][static_cast<size_t>(d)])continue;
    uint32_t*mask=&mk[face][static_cast<size_t>(d)*static_cast<size_t>(U)*static_cast<size_t>(V)];
-   for(int v=0;v<V;v++)for(int u=0;u<U;u++){
+   for(int v=(face<2?0:yLo);v<(face<2?V:yHi);v++)for(int u=0;u<U;u++){
     const uint32_t val=mask[(size_t)v*U+u]; if(!val)continue;
     int w=1,h=1;
     // quads are at most 31 blocks long: the packed uv has 9 bits (1/16 units = 32 blocks), a longer quad wrapped around and came out stretched / with the wrong texture
@@ -469,7 +470,7 @@ ChunkMesh World::buildMesh(const ChunkSnapshot&s,int cx,int cz){
   }
  }
  (void)cx;(void)cz;
- res.maxY=H; size_t n=0; for(int b=0;b<kBuckets;b++)n+=out.b[b].size();
+ res.maxY=yHi; res.ox=cx*16; res.oz=cz*16; size_t n=0; for(int b=0;b<kBuckets;b++)n+=out.b[b].size();
  res.vertices.reserve(n); for(int b=0;b<kBuckets;b++){ res.vertices.insert(res.vertices.end(),out.b[b].begin(),out.b[b].end()); res.bucketEnd[b]=static_cast<uint32_t>(res.vertices.size()); }
  return res;
 }

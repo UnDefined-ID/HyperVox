@@ -24,11 +24,11 @@ namespace{
 const char* kBlockVS=R"(#version 330 core
 layout(location=0) in uint inA;
 layout(location=1) in uint inB;
-uniform mat4 uVP; uniform vec3 uOrigin;
+uniform mat4 uVP; uniform vec4 uOrigin;
 out vec2 uv; flat out uint texId; flat out float shade; out vec3 vRel;
 const float SHADE[6]=float[6](0.431,1.0,0.686,0.686,0.843,0.843);
 void main(){
- vec3 p=vec3(float(inA&511u),float(((inA>>18)&4095u)|((inB>>31)<<12)),float((inA>>9)&511u))/16.0+uOrigin;
+ vec3 p=vec3(float(inA&511u),float(((inA>>18)&4095u)|((inB>>31)<<12)),float((inA>>9)&511u))/16.0*uOrigin.w+uOrigin.xyz;
  vRel=p; gl_Position=uVP*vec4(p,1.0);
  uv=vec2(float(inB&511u),float((inB>>9)&511u))/16.0;
  texId=(inB>>18)&4095u;
@@ -171,12 +171,12 @@ void GlRenderer::updateTiles(const std::vector<TileUpdate>&t){
 }
 bool GlRenderer::upload(int cx,int cz,const ChunkMesh&m){
  const uint64_t k=ckey(cx,cz); auto it=index_.find(k);
- if(m.vertices.empty()||m.vertices.size()>65535){ release(cx,cz); return true; }
+ if(m.vertices.empty()||m.vertices.size()>(1u<<24)){ release(cx,cz); return true; }
  const uint32_t vc=(uint32_t)m.vertices.size();
  if(it==index_.end()&&uint64_t(vArena_.freeUnits())*100<uint64_t(vArena_.capacity)*8)return false;   // keep 8% for re-meshing edited chunks
  const uint32_t vo=vArena_.alloc(vc); if(vo==UINT32_MAX)return false;
  hvglBindBuffer(HVGL_ARRAY_BUFFER,vboChunk_); hvglBufferSubData(HVGL_ARRAY_BUFFER,(HVglintptr)vo*sizeof(Vertex),(HVglsizeiptr)vc*sizeof(Vertex),m.vertices.data());
- GpuChunk g{cx,cz,vo,vc,{},m.maxY}; for(int i=0;i<kBuckets;i++)g.end[i]=m.bucketEnd[i];
+ GpuChunk g{cx,cz,vo,vc,{},m.maxY}; for(int i=0;i<kBuckets;i++)g.end[i]=m.bucketEnd[i]; g.ox=m.ox;g.oz=m.oz;g.scale=m.scale;g.size=m.size;
  if(it!=index_.end()){ GpuChunk&o=list_[it->second]; vArena_.release(o.vOff,o.vCnt); o=g; }   // GL syncs buffer writes with queued draws itself
  else{ index_[k]=(uint32_t)list_.size(); list_.push_back(g); }
  return true;
@@ -213,25 +213,25 @@ void GlRenderer::draw(const FrameParams&fp,const UiVertex*ui,uint32_t skyQuads,u
   struct TV{float d;uint32_t gi;float ox,oy,oz;}; static std::vector<TV> vt; vt.clear(); uint32_t n=0;
   for(uint32_t gi=0;gi<(uint32_t)list_.size();gi++){
    const GpuChunk&g=list_[gi];
-   if(!chunkInRange(g.cx-fp.chunkX,g.cz-fp.chunkZ,fp.renderDist))continue;
-   const float ox=float(g.cx*16)-fp.camera.x,oy=-fp.camera.y,oz=float(g.cz*16)-fp.camera.z;
-   if(!visible(fp.vp,ox,oy,oz,ox+16.f,oy+float(g.maxY),oz+16.f,clipControl_))continue;
-   { bool set=false; forEachBucketRun(g.end,visibleBuckets(ox,oy,oz,g.maxY),[&](uint32_t first,uint32_t count){   // only faces that can point at the camera
-      if(!set){ hvglUniform3f(uBlockOrigin_,ox,oy,oz); set=true; }
-      hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)(count/4*6),HVGL_UNSIGNED_SHORT,(const void*)0,(HVglint)(g.vOff+first)); }); }
-   if(g.end[7]>g.end[6]){ const float dx=ox+8.f,dz=oz+8.f; vt.push_back(TV{dx*dx+dz*dz,gi,ox,oy,oz}); }
+   if(g.size==16&&g.scale==1.f&&!chunkInRange((g.ox>>4)-fp.chunkX,(g.oz>>4)-fp.chunkZ,fp.renderDist))continue;
+   const float ox=float(g.ox)-fp.camera.x,oy=-fp.camera.y,oz=float(g.oz)-fp.camera.z;
+   if(!visible(fp.vp,ox,oy,oz,ox+float(g.size),oy+float(g.maxY),oz+float(g.size),clipControl_))continue;
+   { bool set=false; forEachBucketRun(g.end,visibleBuckets(ox,oy,oz,g.maxY,float(g.size)),[&](uint32_t first,uint32_t count){   // only faces that can point at the camera
+      if(!set){ hvglUniform4f(uBlockOrigin_,ox,oy,oz,g.scale); set=true; }
+      { uint32_t dn=0; while(dn<count){ const uint32_t q=std::min<uint32_t>((count-dn)/4,16383u); hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)(q*6),HVGL_UNSIGNED_SHORT,(const void*)0,(HVglint)(g.vOff+first+dn)); dn+=q*4; } } }); }
+   if(g.end[7]>g.end[6]){ const float dx=ox+float(g.size)*0.5f,dz=oz+float(g.size)*0.5f; vt.push_back(TV{dx*dx+dz*dz,gi,ox,oy,oz}); }
    n++;
   }
   for(const auto&kv:ents_){   // entities: small meshes drawn like chunks
    const EntDraw&d=kv.second; const float ox=d.x-fp.camera.x,oy=d.y-fp.camera.y,oz=d.z-fp.camera.z; const float cx=ox+16.f,cy=oy+2.f,cz=oz+16.f;
    if(!visible(fp.vp,cx-d.r,cy-d.r,cz-d.r,cx+d.r,cy+d.r,cz+d.r,clipControl_))continue;
-   hvglUniform3f(uBlockOrigin_,ox,oy,oz); hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)(d.vCnt/4*6),HVGL_UNSIGNED_SHORT,(const void*)0,(HVglint)d.vOff); n++;
+   hvglUniform4f(uBlockOrigin_,ox,oy,oz,1.f); hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)(d.vCnt/4*6),HVGL_UNSIGNED_SHORT,(const void*)0,(HVglint)d.vOff); n++;
   }
   lastDrawn_=n;
   if(!vt.empty()){   // translucent pass: far to near, alpha blended, no depth writes
    std::sort(vt.begin(),vt.end(),[](const TV&a,const TV&b){return a.d>b.d;});
    hvglEnable(HVGL_BLEND); hvglBlendFuncSeparate(HVGL_SRC_ALPHA,HVGL_ONE_MINUS_SRC_ALPHA,HVGL_ONE,HVGL_ZERO); hvglDepthMask(HVGL_FALSE);
-   for(const TV&t:vt){ const GpuChunk&g=list_[t.gi]; hvglUniform3f(uBlockOrigin_,t.ox,t.oy,t.oz); hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)((g.end[7]-g.end[6])/4*6),HVGL_UNSIGNED_SHORT,(const void*)0,(HVglint)(g.vOff+g.end[6])); }
+   for(const TV&t:vt){ const GpuChunk&g=list_[t.gi]; hvglUniform4f(uBlockOrigin_,t.ox,t.oy,t.oz,g.scale); { uint32_t ci=(g.end[7]-g.end[6])/4*6,vo=g.vOff+g.end[6]; while(ci>0){ const uint32_t k=std::min(ci,98298u); hvglDrawElementsBaseVertex(HVGL_TRIANGLES,(HVglsizei)k,HVGL_UNSIGNED_SHORT,(const void*)0,(HVglint)vo); ci-=k; vo+=65532; } } }
    hvglDepthMask(HVGL_TRUE); hvglDisable(HVGL_BLEND);
   }
  }

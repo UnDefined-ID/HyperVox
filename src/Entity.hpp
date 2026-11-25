@@ -2,6 +2,7 @@
 // Mobs and other entities: items on the ground, cow / pig / chicken, creeper, enderman, blaze, ender dragon, end crystal, boat, minecart.
 // The logic lives in Entity.cpp, the box models (vanilla layout, baked into the block atlas as 16x16 tiles) and their mesh builder in EntityModel.cpp.
 #include <cstdint>
+#include <deque>
 #include <functional>
 #include <string>
 #include <vector>
@@ -43,7 +44,7 @@ struct EntityEnv{
 
 class EntityMgr{
 public:
- std::vector<Entity> list; uint32_t nextId=1;
+ std::deque<Entity> list; uint32_t nextId=1;
  bool dragonDefeated=false; bool dragonSpawned=false; float bossFlash=0;
  Entity* find(uint32_t id);
  Entity& spawn(EType t,const Vec3&pos);

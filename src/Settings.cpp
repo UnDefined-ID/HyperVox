@@ -18,7 +18,7 @@ void Settings::resetKeys(){
  keys[ACT_DOWN]=K_LSHIFT;keys[ACT_SPRINT]=K_R;keys[ACT_FLY]=K_F;keys[ACT_INVENTORY]=K_E;
 }
 void Settings::clamp(){
- renderDistance=std::clamp(renderDistance,kMinRender,kHardMaxRender); fov=std::clamp(fov,30,110); mouseSens=std::clamp(mouseSens,0.f,1.f); guiDelta=std::clamp(guiDelta,-2,2); ramLimitMB=std::clamp(ramLimitMB,64,262144); cleanerMode=std::clamp(cleanerMode,0,2);
+ renderDistance=std::clamp(renderDistance,kMinRender,kHardMaxRender); fov=std::clamp(fov,30,110); mouseSens=std::clamp(mouseSens,0.f,1.f); guiDelta=std::clamp(guiDelta,-2,2); ramLimitMB=std::clamp(ramLimitMB,64,262144); cleanerMode=std::clamp(cleanerMode,0,2); maxFps=maxFps<=0?0:std::clamp(maxFps,30,1000); resX=std::clamp(resX,320,16384); resY=std::clamp(resY,240,16384);
 }
 
 std::filesystem::path Settings::dataDir(){
@@ -91,6 +91,9 @@ bool Settings::load(){
    else if(k=="ramLimitMB")ramLimitMB=std::stoi(v);
    else if(k=="cleanerMode")cleanerMode=std::stoi(v);
    else if(k=="mipmaps")mipmaps=(v!="false"&&v!="0");
+   else if(k=="maxFps")maxFps=std::stoi(v);
+   else if(k=="resX")resX=std::stoi(v);
+   else if(k=="resY")resY=std::stoi(v);
    else if(k=="keyScheme")keyScheme=std::stoi(v);
    else if(k=="renderer")renderer=(v=="opengl"||v=="1")?1:0;
    else if(k=="username"){if(!v.empty())username=v.substr(0,16);}
@@ -105,7 +108,7 @@ bool Settings::load(){
 bool Settings::save() const{
  namespace fs=std::filesystem; const fs::path p=file(), tmp=fs::path(p).concat(".tmp");
  { std::ofstream f(tmp,std::ios::trunc); if(!f)return false;
-   f<<"renderDistance:"<<renderDistance<<"\nfov:"<<fov<<"\nmouseSensitivity:"<<mouseSens<<"\nvsync:"<<(vsync?"true":"false")<<"\ndebugLevel:"<<debugLevel<<"\nresourcePack:"<<resourcePack<<"\nguiDelta:"<<guiDelta<<"\nrenderer:"<<(renderer?"opengl":"vulkan")<<"\nusername:"<<username<<"\nskin:"<<skin<<"\nramLimitMB:"<<ramLimitMB<<"\ncleanerMode:"<<cleanerMode<<"\nmipmaps:"<<(mipmaps?"true":"false")<<"\nkeyScheme:"<<keyScheme<<"\n";
+   f<<"renderDistance:"<<renderDistance<<"\nfov:"<<fov<<"\nmouseSensitivity:"<<mouseSens<<"\nvsync:"<<(vsync?"true":"false")<<"\ndebugLevel:"<<debugLevel<<"\nresourcePack:"<<resourcePack<<"\nguiDelta:"<<guiDelta<<"\nrenderer:"<<(renderer?"opengl":"vulkan")<<"\nusername:"<<username<<"\nskin:"<<skin<<"\nramLimitMB:"<<ramLimitMB<<"\ncleanerMode:"<<cleanerMode<<"\nmipmaps:"<<(mipmaps?"true":"false")<<"\nkeyScheme:"<<keyScheme<<"\nmaxFps:"<<maxFps<<"\nresX:"<<resX<<"\nresY:"<<resY<<"\n";
    for(int a=0;a<ACT_COUNT;a++)f<<kKeyNames[a]<<":"<<keys[a]<<"\n";
    f.flush(); if(!f)return false; }
  std::error_code ec; fs::rename(tmp,p,ec);

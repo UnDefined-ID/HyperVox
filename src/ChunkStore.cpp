@@ -57,7 +57,7 @@ bool nbtToChunk(const Nbt&root,Chunk&c){
    if(const Nbt*q=pr->get("thickness")){ extra=q->s; if(const Nbt*d=pr->get("vertical_direction"))extra+="|"+d->s; }   // dripstone
    int mk=0; static const char*f6[6]={"north","east","south","west","up","down"}; for(int i=0;i<6;i++)if(const Nbt*q=pr->get(f6[i]))if(q->s=="true")mk|=1<<i;   // vines / lichen faces
    if(mk&&extra.empty())extra="mf"+std::to_string(mk);
-   if(extra.empty()){ if(const Nbt*q=pr->get("layers"))extra="L"+q->s; else if(const Nbt*q=pr->get("age"))extra="A"+q->s; else if(const Nbt*q=pr->get("part"))extra="P"+q->s; else if(const Nbt*q=pr->get("eye"))extra="E"+q->s; }
+   if(extra.empty()){ if(const Nbt*q=pr->get("layers"))extra="L"+q->s; else if(const Nbt*q=pr->get("age"))extra="A"+q->s; else if(const Nbt*q=pr->get("part"))extra="P"+q->s; else if(const Nbt*q=pr->get("eye"))extra="E"+q->s; else if(const Nbt*q=pr->get("shape")){ extra="R"+q->s; if(const Nbt*w=pr->get("powered"))if(w->s=="true")extra+="+on"; } }
    if(ty.empty())ty=extra; } } ids.push_back(nm?mapBlock(nm->s,ax,fc,hf,ty):uint16_t(0)); }
   const Nbt*da=bs->get("data"); int bits=4; while((1<<bits)<(int)ids.size())bits++; const int per=64/bits;
   for(int i=0;i<4096;i++){

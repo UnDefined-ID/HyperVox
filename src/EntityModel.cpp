@@ -59,7 +59,7 @@ void buildModels(){
    int bottom=part(m,0,3,1,PI/2),back=part(m,-15,4,4,0,3*PI/2),front=part(m,15,4,0,0,PI/2),right=part(m,0,4,-9,0,PI),left=part(m,0,4,9);
    box(m,bottom,-14,-9,-3,28,16,3,0,0); box(m,back,-13,-7,-1,18,6,2,0,19); box(m,front,-8,-7,-1,16,6,2,0,27); box(m,right,-14,-7,-1,28,6,2,0,35); box(m,left,-14,-7,-1,28,6,2,0,43); }
  // ---------------- minecart (64x32)
- { EModelDef&m=g_models[(size_t)EType::Minecart]; m.name="minecart"; m.tex="entity/minecart/minecart.png"; m.hurtTiles=false; m.baseY=13;
+ { EModelDef&m=g_models[(size_t)EType::Minecart]; m.name="minecart"; m.tex="entity/minecart/minecart.png"; m.hurtTiles=false; m.baseY=13; m.yawOff=PI/2;
    int bottom=part(m,0,4,0,PI/2),front=part(m,-9,4,0,0,3*PI/2),back=part(m,9,4,0,0,PI/2),left=part(m,0,4,-7,0,PI),right=part(m,0,4,7);
    box(m,bottom,-10,-8,-1,20,16,2,0,10); box(m,front,-8,-9,-1,16,8,2,0,0); box(m,back,-8,-9,-1,16,8,2,0,0); box(m,left,-8,-9,-1,16,8,2,0,0); box(m,right,-8,-9,-1,16,8,2,0,0); }
  // ---------------- ender dragon (256x256)

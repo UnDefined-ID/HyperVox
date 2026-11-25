@@ -105,7 +105,7 @@ float EntityMgr::surfaceY(const World&w,int x,int z,int fromY){
 }
 
 Entity& EntityMgr::spawn(EType t,const Vec3&pos){
- Entity e; e.id=nextId++; e.type=t; e.pos=pos; const Dims d=dimsOf(t); e.w=d.w; e.h=d.h; e.health=e.maxHealth=d.hp; e.yaw=rnd(0,2*PI); e.bodyYaw=e.yaw; e.t0=rnd(0.5f,3.f);
+ Entity e; e.id=nextId++; e.type=t; e.pos=pos; const Dims d=dimsOf(t); e.w=d.w; e.h=d.h; e.health=e.maxHealth=d.hp; e.yaw=rnd(0,2*PI); e.bodyYaw=e.yaw; e.prevYaw=e.yaw; e.prev=pos; e.t0=rnd(0.5f,3.f);
  if(t==EType::Dragon){ e.s0=0; e.t0=8.f; e.t3=rnd(0,6.28f); }
  list.push_back(e); return list.back();
 }
@@ -141,7 +141,7 @@ void EntityMgr::hurt(Entity&e,float amount,const Vec3&from,float knock,EntityEnv
  if(e.type!=EType::Dragon&&e.type!=EType::Crystal&&e.type!=EType::Boat&&e.type!=EType::Minecart&&e.type!=EType::Blaze&&e.type!=EType::Ghast&&e.type!=EType::Arrow){ e.vel.x+=away.x*knock*4.f; e.vel.z+=away.z*knock*4.f; e.vel.y=std::max(e.vel.y,3.5f*knock); e.onGround=false; e.t3=0.3f; }
  if(e.type==EType::Wolf||e.type==EType::Spider){ e.s0=1; e.t1=20.f; }
  if(e.type==EType::Cow||e.type==EType::Pig||e.type==EType::Chicken||e.type==EType::Sheep||e.type==EType::Villager){ e.s0=2; e.t0=4.f; e.target=Vec3{e.pos.x+away.x*12,0,e.pos.z+away.z*12}; }
- if(e.type==EType::Enderman){ e.s0=1; e.t1=0; if(e.health>0&&e.health<e.maxHealth&&rnd(0,1)<0.7f){ e.t2=0.05f; } }
+ if(e.type==EType::Enderman){ e.s0=1; e.t1=0; if(e.health>0&&e.health<e.maxHealth&&rnd(0,1)<0.7f){ e.t2=0.12f; } }
  if(env.sound){ const char*ev=e.type==EType::Zombie?"mob.zombie.hurt":e.type==EType::Skeleton?"mob.skeleton.hurt":e.type==EType::Spider?"mob.spider.say":e.type==EType::Sheep?"mob.sheep.say":e.type==EType::Ghast?"mob.ghast.scream":e.type==EType::Slime?"mob.slime.small":e.type==EType::Wolf?"mob.wolf.hurt":e.type==EType::Villager?"mob.villager.hit":e.type==EType::Cow?"mob.cow.hurt":e.type==EType::Pig?"mob.pig.say":e.type==EType::Chicken?"mob.chicken.hurt":e.type==EType::Creeper?"mob.creeper.say":e.type==EType::Enderman?"mob.endermen.hit":e.type==EType::Blaze?"mob.blaze.hit":e.type==EType::Dragon?"mob.enderdragon.hit":"random.pop"; env.sound(ev,e.pos,1.f,1.f); }
  if(e.type==EType::Crystal&&env.explode){ e.dead=true; env.explode(Vec3{e.pos.x,e.pos.y+1.f,e.pos.z},6.f,true,e.id); }
  if(e.health<=0&&!e.dead){
@@ -270,7 +270,7 @@ void EntityMgr::update(float dt,EntityEnv&env){
     bool hostile=e.type==EType::Zombie||e.type==EType::Skeleton||(e.type==EType::Spider&&(night||e.s0==1))||(e.type==EType::Wolf&&e.s0==1);
     if(e.type==EType::Wolf||e.type==EType::Spider){ if(e.s0==1){ e.t1-=dt; if(e.t1<=0)e.s0=0; } }
     // zombies and skeletons burn in daylight
-    if((e.type==EType::Zombie||e.type==EType::Skeleton)&&!isNight(env.worldTime)&&skyExposed(w,e.pos)&&!e.inWater&&!e.inLava){ e.t2+=dt; if(e.t2>=1.f){ e.t2=0; e.hurt=0; hurt(e,1.f,e.pos,0.f,env); if(e.dead)break; } }
+    if((e.type==EType::Zombie||e.type==EType::Skeleton)&&!isNight(env.worldTime)&&skyExposed(w,e.pos)&&!e.inWater&&!e.inLava){ e.t1+=dt; if(e.t1>=1.f){ e.t1=0; e.hurt=0; hurt(e,1.f,e.pos,0.f,env); if(e.dead)break; } }
     Vec3 dir=horizTo(e.pos,env.player); float want=0; const float hd=dist2d(e.pos,env.player);
     if(hostile&&sees){
      if(e.type==EType::Skeleton){

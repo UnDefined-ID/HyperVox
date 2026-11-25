@@ -21,7 +21,14 @@ static bool parseFloat(const std::string& s, float& out) {
 // ─── commands ─────────────────────────────────────────────────────────────────
 void Game::registerCommands() {
     const double& now = time_;
-    chat_.onCommand = [this,&now](const std::vector<std::string>& a) -> bool {
+    chat_.onCommand = [this,&now](const std::vector<std::string>& a0) -> bool {
+        // like the real game: "minecraft:" prefixes and @s / @p selectors are accepted, "~" and "~5" are relative to the player in /tp /setblock /summon
+        const std::vector<std::string> a=[&]{ std::vector<std::string> r; for(size_t i=0;i<a0.size();i++){ std::string t=a0[i]; if(t.compare(0,10,"minecraft:")==0)t=t.substr(10); if(i==0)for(auto&ch:t)ch=(char)std::tolower((unsigned char)ch);
+          if(i>0&&(t=="@s"||t=="@p"||t=="@a"||t=="@e"||t=="@r"||t==settings_.username))continue; r.push_back(t); }
+         const std::string&c=r[0]; const int s0=(c=="tp"||c=="teleport"||c=="setblock")?1:(c=="summon"?2:-1);
+         if(s0>0)for(int i=0;i<3&&(size_t)(s0+i)<r.size();i++){ std::string&t=r[(size_t)(s0+i)]; if(t.empty()||t[0]!='~')continue; float off=0; try{ if(t.size()>1)off=std::stof(t.substr(1)); }catch(...){}
+          const float v=(i==0?pos_.x:(i==1?pos_.y:pos_.z))+off; t=(c=="setblock")?std::to_string((int)std::floor(v)):std::to_string(v); }
+         return r; }();
         const std::string& cmd = a[0];
 
         // /tp [x y z | player]
@@ -29,7 +36,7 @@ void Game::registerCommands() {
             if(a.size()>=4) {
                 float x,y,z;
                 if(parseFloat(a[1],x)&&parseFloat(a[2],y)&&parseFloat(a[3],z)) {
-                    pos_=Vec3{x,y,z}; vel_=Vec3{}; chat_.sys("Teleported to "+a[1]+" "+a[2]+" "+a[3],now); return true;
+                    pos_=Vec3{x,y,z}; vel_=Vec3{}; chat_.sys("Teleported "+settings_.username+" to "+a[1]+", "+a[2]+", "+a[3],now); return true;
                 }
             } else if(a.size()==2&&(a[1]=="~"||a[1]=="here")) {
                 chat_.sys("Already here: "+std::to_string((int)pos_.x)+" "+std::to_string((int)pos_.y)+" "+std::to_string((int)pos_.z),now); return true;
@@ -41,9 +48,9 @@ void Game::registerCommands() {
         if(cmd=="gamemode"||cmd=="gm") {
             if(a.size()<2){chat_.sys("Usage: /gamemode <survival|creative>",now);return true;}
             const std::string& m=a[1];
-            if(m=="creative"||m=="c"||m=="1"){cur_.mode=MODE_CREATIVE;flying_=false;chat_.sys("Game mode set to Creative",now);}
-            else if(m=="spectator"||m=="sp"||m=="3"){cur_.mode=MODE_SPECTATOR;flying_=true;chat_.sys("Game mode set to Spectator",now);}
-            else if(m=="survival"||m=="s"||m=="0"){cur_.mode=MODE_SURVIVAL;flying_=false;chat_.sys("Game mode set to Survival",now);}
+            if(m=="creative"||m=="c"||m=="1"){cur_.mode=MODE_CREATIVE;flying_=false;chat_.sys("Set own game mode to Creative Mode",now);}
+            else if(m=="spectator"||m=="sp"||m=="3"){cur_.mode=MODE_SPECTATOR;flying_=true;chat_.sys("Set own game mode to Spectator Mode",now);}
+            else if(m=="survival"||m=="s"||m=="0"){cur_.mode=MODE_SURVIVAL;flying_=false;chat_.sys("Set own game mode to Survival Mode",now);}
             else chat_.sys("Unknown mode: "+m,now);
             return true;
         }
@@ -73,7 +80,7 @@ void Game::registerCommands() {
         // /time <set|add|query> <value>
         if(cmd=="time") {
             if(a.size()<2){chat_.sys("Usage: /time <set|add|query> [value]",now);return true;}
-            if(a[1]=="query"){chat_.sys("Time: "+std::to_string(worldTime_)+" ("+std::to_string(worldTime_%24000)+" ticks into day)",now);return true;}
+            if(a[1]=="query"){chat_.sys("The time is "+std::to_string(worldTime_%24000),now);return true;}
             if(a.size()<3){chat_.sys("Usage: /time set|add <ticks>",now);return true;}
             int v;
             if(!parseInt(a[2],v)){ // named times
@@ -82,7 +89,7 @@ void Game::registerCommands() {
             if(a[1]=="set") worldTime_=(worldTime_/24000)*24000+v;
             else if(a[1]=="add") worldTime_+=v;
             else{chat_.sys("Usage: /time <set|add|query>",now);return true;}
-            chat_.sys("Set time to "+std::to_string(worldTime_%24000),now); return true;
+            chat_.sys("Set the time to "+std::to_string(worldTime_%24000),now); return true;
         }
 
         // /tick <query|rate|freeze|unfreeze|step [n]>
@@ -115,7 +122,7 @@ void Game::registerCommands() {
             if(ty==EType::Count){chat_.sys("Unknown entity: "+a[1],now);return true;}
             Vec3 p{pos_.x-std::sin(yaw_)*-2.5f,pos_.y,pos_.z+std::cos(yaw_)*-2.5f}; if(a.size()>=5){ try{ p=Vec3{std::stof(a[2])+0.5f,std::stof(a[3]),std::stof(a[4])+0.5f}; }catch(...){} }
             if(ty==EType::Dragon){ ents_.dragonSpawned=true; p.y+=25.f; } if(ty==EType::Ghast)p.y+=6.f;
-            { Entity&ne=ents_.spawn(ty,p); if(ty==EType::Slime){ ne.variant=2; ne.w=ne.h=1.04f; ne.health=ne.maxHealth=4.f; } } chat_.sys("Summoned "+tn,now); return true; }
+            { Entity&ne=ents_.spawn(ty,p); if(ty==EType::Slime){ ne.variant=2; ne.w=ne.h=1.04f; ne.health=ne.maxHealth=4.f; } } chat_.sys("Summoned new "+tn,now); return true; }
         if(cmd=="locate") {
             std::vector<std::string> A=a;
             // /locate structure <village|mineshaft|desert_pyramid|jungle_temple|stronghold|nether_fortress|bastion|end_city|ruined_portal|ancient_city|igloo|woodland_mansion|trial_chambers|shipwreck|...>: the terrain helper gives no structure positions,
@@ -148,16 +155,16 @@ void Game::registerCommands() {
             if(a.size()<2){chat_.sys("Usage: /give <item> [count]",now);return true;}
             const std::string& item=a[1]; int count=a.size()>=3?std::max(1,std::min(64,std::stoi(a[2]))):64;
             const ItemId id=Registry::get().itemByName(item);
-            if(!id){chat_.sys("Unknown item: "+item,now);return true;}
+            if(!id){chat_.sys("Unknown item '"+item+"'",now);return true;}
             const int left=cur_.inv.add(id,count);
-            chat_.sys("Gave "+std::to_string(count-left)+" "+item+(left>0?" (inventory full)":""),now); return true;
+            chat_.sys("Gave "+std::to_string(count-left)+" ["+Registry::get().item(id).display+"] to "+settings_.username+(left>0?" (inventory full)":""),now); return true;
         }
 
         // /clear
-        if(cmd=="clear") { for(auto& s:cur_.inv.s) s.clear(); chat_.sys("Cleared inventory",now); return true; }
+        if(cmd=="clear") { for(auto& s:cur_.inv.s) s.clear(); chat_.sys("Removed items from player "+settings_.username,now); return true; }
 
         // /kill
-        if(cmd=="kill") { health_=0; die(); chat_.sys("Killed.",now); return true; }
+        if(cmd=="kill") { health_=0; die(); chat_.sys("Killed "+settings_.username,now); return true; }
         if(cmd=="gc"||cmd=="memory") { cleanMemory(); chat_.sys("Memory cleaned ("+std::to_string(processRssMB())+" MB in use)",now); return true; }
 
         // /setblock <x> <y> <z> <block>
@@ -166,11 +173,11 @@ void Game::registerCommands() {
             int x,y,z; if(!parseInt(a[1],x)||!parseInt(a[2],y)||!parseInt(a[3],z)){chat_.sys("Invalid coords",now);return true;}
             const std::string& bn=a[4]; const BlockId bid=(bn=="air"||bn=="minecraft:air")?0:Registry::get().blockByName(bn.compare(0,10,"minecraft:")==0?bn.substr(10):bn);
             int out[3][2]; int n=world_.set(x,y,z,bid,out); for(int i=0;i<n;i++) streamer_->markDirty(out[i][0],out[i][1]);
-            chat_.sys("Set block at "+a[1]+" "+a[2]+" "+a[3]+" to "+bn,now); return true;
+            chat_.sys("Changed the block at "+a[1]+", "+a[2]+", "+a[3],now); return true;
         }
 
         // /seed
-        if(cmd=="seed"){chat_.sys("Seed: "+std::to_string((long long)(int64_t)cur_.seed),now);return true;}
+        if(cmd=="seed"){chat_.sys("Seed: ["+std::to_string((long long)(int64_t)cur_.seed)+"]",now);return true;}
 
         // /fly
         if(cmd=="fly"||cmd=="flying") {
@@ -179,6 +186,8 @@ void Game::registerCommands() {
         }
 
         // /help
+        if(cmd=="say"&&a.size()>=2){ chat_.say("["+settings_.username+"] "+join(a,1),now); return true; }
+        if(cmd=="me"&&a.size()>=2){ chat_.say("* "+settings_.username+" "+join(a,1),now); return true; }
         if(cmd=="help"||cmd=="?") {
             const char* cmds[]={"/tp x y z","/gamemode <survival|creative|spectator>","/gamerule [rule] [val]","/time <set|add|query> [val]","/tick [query|rate|freeze|unfreeze|step]","/locate block <name> [radius]","/dimension <overworld|nether|end>","/give <item> [count]","/clear","/setblock x y z <block>","/kill","/seed","/fly"};
             for(auto c:cmds) chat_.sys(c,now); return true;

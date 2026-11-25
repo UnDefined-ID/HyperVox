@@ -38,12 +38,12 @@ struct Vertex{ uint32_t a,b; };
 // bucketEnd[i] is the vertex index where bucket i ends (bucket 0 starts at 0).
 constexpr int kBuckets=8;
 constexpr int kFaceBucket[6]={3,4,1,6,2,5};   // face id (0=-Y 1=+Y 2=-X 3=+X 4=-Z 5=+Z) -> bucket
-struct ChunkMesh{ std::vector<Vertex> vertices; uint32_t bucketEnd[kBuckets]={0,0,0,0,0,0,0,0}; int maxY=0; };
+struct ChunkMesh{ std::vector<Vertex> vertices; uint32_t bucketEnd[kBuckets]={0,0,0,0,0,0,0,0}; int maxY=0; int ox=0,oz=0; float scale=1.f; int size=16; /* world origin (blocks), vertex scale, width in blocks: merged far meshes use scale 2 / 8 */ };
 // Which opaque buckets (bit i = bucket i, bucket 0 always) can face the camera.  ox/oy/oz = the chunk's minimum corner relative to the camera, top = highest y of the chunk.
-inline unsigned visibleBuckets(float ox,float oy,float oz,int top){
+inline unsigned visibleBuckets(float ox,float oy,float oz,int top,float sz=16.f){
  const float e=0.05f; unsigned m=1u;
- if(ox+16.f>-e){m|=1u<<1;} if(ox<e){m|=1u<<6;}        // -X faces need the camera on the -X side of them, +X faces the +X side
- if(oz+16.f>-e){m|=1u<<2;} if(oz<e){m|=1u<<5;}
+ if(ox+sz>-e){m|=1u<<1;} if(ox<e){m|=1u<<6;}        // -X faces need the camera on the -X side of them, +X faces the +X side
+ if(oz+sz>-e){m|=1u<<2;} if(oz<e){m|=1u<<5;}
  if(oy+float(top)+1.f>-e){m|=1u<<3;} if(oy<e){m|=1u<<4;}
  return m;
 }
@@ -78,7 +78,7 @@ public:
  int set(int x,int y,int z,uint16_t id,int outChunks[3][2]);  // returns how many chunks need re-meshing
  std::shared_ptr<const Chunk> acquire(int cx,int cz,bool cache)const;
  ChunkSnapshot snapshot(int cx,int cz)const;
- static ChunkMesh buildMesh(const ChunkSnapshot&s,int cx,int cz);
+ static ChunkMesh buildMesh(const ChunkSnapshot&s,int cx,int cz,int ys=0,int ye=1<<30);   // ys..ye = only the blocks in that y range (one section)
 
  int terrainHeight(int wx,int wz)const;                       // y of the top terrain block (trees excluded)
  Vec3 findSpawn()const;
@@ -87,7 +87,7 @@ public:
  using DirtyList=std::vector<std::pair<uint64_t,std::shared_ptr<const Chunk>>>;
  DirtyList dirtyChunks()const;                                // chunks changed since they were last saved
  void markSaved(const DirtyList&saved);                       // forget the ones that were not modified again meanwhile
- size_t dirtyCount()const;
+ size_t dirtyCount()const; int lastEditY()const{return m_lastY;}
  DirtyList takeGenerated();
  std::vector<std::array<int,3>> takeChanges();                  // every block set() since the last call (world coordinates): drives block updates and fluids
  std::vector<std::array<int,3>> takeNewLootChests();           // chests / barrels the generator placed in freshly generated chunks since the last call (world block coordinates)                                  // chunks the generator made since the last call (to be written to the save, so the terrain never changes)
@@ -96,7 +96,7 @@ private:
  static uint64_t key(int cx,int cz){return (static_cast<uint64_t>(static_cast<uint32_t>(cx))<<32)|static_cast<uint32_t>(cz);}
  void generate(int cx,int cz,Chunk&c)const;
  void generateDebug(int cx,int cz,Chunk&c)const;
- bool m_steel=true; bool m_debug=false; int m_dim=0;
+ bool m_steel=true; bool m_debug=false; int m_dim=0; mutable int m_lastY=-1;
  uint32_t m_seed=0; uint64_t m_seed64=0; Loader m_loader;
 
  mutable std::shared_mutex m_mu;

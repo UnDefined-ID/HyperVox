@@ -24,7 +24,7 @@ public:
     void histDown();
 
     // submit the current input; returns false if it was a command (don't echo to chat)
-    bool submit(double now);    // triggers m_cmdHandler if set
+    std::string name="Player"; bool submit(double now);    // triggers m_cmdHandler if set
     void say(const std::string& text, double now);
     void sys(const std::string& text, double now);  // system/command feedback
 
